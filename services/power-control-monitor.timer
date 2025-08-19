@@ -1,0 +1,12 @@
+[Unit]
+Description=Power Control Monitor Timer
+Documentation=https://github.com/username/linux-power-manager
+Requires=power-control-monitor.service
+
+[Timer]
+OnBootSec=30min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

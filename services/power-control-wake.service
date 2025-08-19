@@ -1,0 +1,15 @@
+[Unit]
+Description=Power Control Wake Service
+Documentation=https://github.com/username/linux-power-manager
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/power-control.sh wake
+RemainAfterExit=no
+TimeoutStartSec=30
+User=root
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target

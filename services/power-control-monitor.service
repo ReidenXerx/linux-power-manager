@@ -1,0 +1,9 @@
+[Unit]
+Description=Power Control Monitor Service
+Documentation=https://github.com/username/linux-power-manager
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/power-control.sh monitor
+User=root
+Environment=DISPLAY=:0
