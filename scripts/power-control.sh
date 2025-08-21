@@ -153,6 +153,7 @@ has_acpi() { command -v acpi > /dev/null 2>&1; }
 has_sensors() { command -v sensors > /dev/null 2>&1; }
 has_tlp() { command -v tlp > /dev/null 2>&1; }
 has_envycontrol() { command -v envycontrol > /dev/null 2>&1; }
+has_disk_manager() { [ -x "$(dirname "$0")/disk-manager.sh" ] || [ -x "/usr/local/bin/disk-manager.sh" ]; }
 
 # ============================================================================
 # GPU MANAGEMENT FUNCTIONS
@@ -926,6 +927,13 @@ show_help() {
     echo "  swap-on           - Manually activate hibernation swap"
     echo "  swap-off          - Manually deactivate hibernation swap"
     echo ""
+    echo -e "${YELLOW}Disk Management Commands:${NC}"
+    echo "  disk-status       - Show comprehensive disk management status"
+    echo "  disk-suspend <disk> - Suspend specific disk (e.g., nvme1n1)"
+    echo "  disk-suspend-all  - Suspend all monitored disks"
+    echo "  disk-wake <disk>  - Wake up specific disk"
+    echo "  disk-config       - Configure disk management settings"
+    echo ""
     echo -e "${YELLOW}System Integration:${NC}"
     echo "  startup           - Apply startup power mode (used by systemd)"
     echo "  wake              - Apply wake power mode (used by systemd)"
@@ -1070,6 +1078,71 @@ case "$1" in
         ;;
     "desktop")
         echo "Detected desktop environment: $(detect_desktop)"
+        ;;
+    
+    # Disk Management commands (NEW)
+    "disk-status")
+        if has_disk_manager; then
+            if [ -x "/usr/local/bin/disk-manager.sh" ]; then
+                /usr/local/bin/disk-manager.sh status
+            else
+                "$(dirname "$0")/disk-manager.sh" status
+            fi
+        else
+            error "Disk manager not available"
+        fi
+        ;;
+    "disk-suspend")
+        if [ -n "$2" ]; then
+            if has_disk_manager; then
+                if [ -x "/usr/local/bin/disk-manager.sh" ]; then
+                    /usr/local/bin/disk-manager.sh suspend "$2"
+                else
+                    "$(dirname "$0")/disk-manager.sh" suspend "$2"
+                fi
+            else
+                error "Disk manager not available"
+            fi
+        else
+            error "Please specify disk name (e.g., nvme1n1)"
+        fi
+        ;;
+    "disk-suspend-all")
+        if has_disk_manager; then
+            if [ -x "/usr/local/bin/disk-manager.sh" ]; then
+                /usr/local/bin/disk-manager.sh suspend-all
+            else
+                "$(dirname "$0")/disk-manager.sh" suspend-all
+            fi
+        else
+            error "Disk manager not available"
+        fi
+        ;;
+    "disk-wake")
+        if [ -n "$2" ]; then
+            if has_disk_manager; then
+                if [ -x "/usr/local/bin/disk-manager.sh" ]; then
+                    /usr/local/bin/disk-manager.sh wake "$2"
+                else
+                    "$(dirname "$0")/disk-manager.sh" wake "$2"
+                fi
+            else
+                error "Disk manager not available"
+            fi
+        else
+            error "Please specify disk name (e.g., nvme1n1)"
+        fi
+        ;;
+    "disk-config")
+        if has_disk_manager; then
+            if [ -x "/usr/local/bin/disk-manager.sh" ]; then
+                /usr/local/bin/disk-manager.sh config
+            else
+                "$(dirname "$0")/disk-manager.sh" config
+            fi
+        else
+            error "Disk manager not available"
+        fi
         ;;
     
     # Help and default

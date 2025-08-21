@@ -183,8 +183,10 @@ install_scripts() {
     # Copy main scripts
     sudo cp "$SCRIPT_DIR/scripts/power-control.sh" "$INSTALL_PREFIX/"
     sudo cp "$SCRIPT_DIR/scripts/power-status.sh" "$INSTALL_PREFIX/"
+    sudo cp "$SCRIPT_DIR/scripts/disk-manager.sh" "$INSTALL_PREFIX/"
     sudo chmod +x "$INSTALL_PREFIX/power-control.sh"
     sudo chmod +x "$INSTALL_PREFIX/power-status.sh"
+    sudo chmod +x "$INSTALL_PREFIX/disk-manager.sh"
     
     success "Scripts installed to $INSTALL_PREFIX"
 }
@@ -218,6 +220,15 @@ install_configs() {
         cp "$SCRIPT_DIR/configs/power-manager.conf" "$CONFIG_DIR/"
     fi
     
+    # Copy disk-manager config
+    if [ ! -f "$CONFIG_DIR/disk-manager.conf" ]; then
+        cp "$SCRIPT_DIR/configs/disk-manager.conf" "$CONFIG_DIR/"
+    else
+        warning "Disk config exists, creating backup..."
+        cp "$CONFIG_DIR/disk-manager.conf" "$CONFIG_DIR/disk-manager.conf.backup"
+        cp "$SCRIPT_DIR/configs/disk-manager.conf" "$CONFIG_DIR/"
+    fi
+    
     # Set GPU switching preference
     if [ "$ENABLE_GPU_SWITCHING" = true ]; then
         sed -i 's/GPU_SWITCHING_ENABLED=false/GPU_SWITCHING_ENABLED=true/' "$CONFIG_DIR/power-control.conf"
@@ -240,6 +251,8 @@ install_services() {
         sudo systemctl enable power-control-startup.service
         sudo systemctl enable power-control-wake.service
         sudo systemctl enable power-control-monitor.timer
+        sudo systemctl enable disk-monitor.service
+        sudo systemctl enable disk-monitor.timer
         
         success "Systemd services installed and enabled"
     fi
@@ -291,6 +304,14 @@ alias gpu-status='power-control.sh gpu-status'
 alias gpu-integrated='power-control.sh gpu-integrated'
 alias gpu-hybrid='power-control.sh gpu-hybrid'
 alias gpu-nvidia='power-control.sh gpu-nvidia'
+
+# Disk Management aliases
+alias disk-status='disk-manager.sh status'
+alias disk-health='disk-manager.sh health'
+alias disk-temp='disk-manager.sh temp'
+alias disk-smart='disk-manager.sh smart'
+alias disk-scan='disk-manager.sh scan'
+alias disk-clean='disk-manager.sh clean'
 EOF
         success "Bash aliases installed"
         info "Run 'source ~/.bashrc' or restart your terminal to use aliases"
@@ -309,6 +330,9 @@ show_usage() {
     echo "  power-control.sh ultra-eco    - Ultra power saving mode"
     echo "  power-control.sh performance-dgpu - High performance mode"
     echo "  power-status.sh select-preset - Interactive preset selection"
+    echo "  disk-manager.sh status        - Show disk status and health"
+    echo "  disk-manager.sh health        - Comprehensive disk health check"
+    echo "  disk-manager.sh temp          - Monitor disk temperatures"
     echo ""
     echo -e "${YELLOW}Aliases (after restart/source):${NC}"
     echo "  power-status      - Show power status"
@@ -317,6 +341,9 @@ show_usage() {
     echo "  power-eco         - Ultra eco mode"
     echo "  power-performance - High performance mode"
     echo "  gpu-status        - Show GPU status"
+    echo "  disk-status       - Show disk status"
+    echo "  disk-health       - Check disk health"
+    echo "  disk-temp         - Monitor disk temperatures"
     echo ""
     echo -e "${YELLOW}Configuration:${NC}"
     echo "  power-control.sh config - Configure settings"
@@ -327,6 +354,99 @@ show_usage() {
     fi
     if [ "$INSTALL_ENVYCONTROL" = true ]; then
         echo -e "${GREEN}GPU switching with envycontrol is available${NC}"
+    fi
+    if [ "$INSTALL_SERVICES" = true ]; then
+        echo -e "${GREEN}Disk monitoring services are enabled${NC}"
+    fi
+}
+
+# Configure disk management settings
+configure_disk_management() {
+    echo -e "${CYAN}Configuring Disk Management Settings...${NC}"
+    echo ""
+    
+    # Configure whitelist expiration
+    echo "When you manually wake up a disk, how long should it be protected from auto-suspension?"
+    echo "1) 30 minutes (1800 seconds)"
+    echo "2) 1 hour (3600 seconds) [DEFAULT]"
+    echo "3) 2 hours (7200 seconds)"
+    echo "4) 6 hours (21600 seconds)"
+    echo "5) 24 hours (86400 seconds)"
+    echo "6) Never expire (0 - manual removal only)"
+    echo ""
+    read -p "Choose whitelist expiration option (1-6, default=2): " whitelist_choice
+    
+    case "$whitelist_choice" in
+        1) WHITELIST_EXPIRY=1800 ;;
+        3) WHITELIST_EXPIRY=7200 ;;
+        4) WHITELIST_EXPIRY=21600 ;;
+        5) WHITELIST_EXPIRY=86400 ;;
+        6) WHITELIST_EXPIRY=0 ;;
+        *) WHITELIST_EXPIRY=3600 ;;  # Default 1 hour
+    esac
+    
+    echo ""
+    read -p "Enable disk monitoring on AC power as well? (y/N): " ac_monitoring
+    case "$ac_monitoring" in
+        [Yy]* ) SUSPEND_ON_BATTERY_ONLY=false ;;
+        * ) SUSPEND_ON_BATTERY_ONLY=true ;;
+    esac
+    
+    echo ""
+    read -p "Disk inactivity timeout in minutes before suspension (default=5): " timeout_choice
+    if [[ "$timeout_choice" =~ ^[0-9]+$ ]] && [ "$timeout_choice" -gt 0 ]; then
+        INACTIVITY_TIMEOUT=$((timeout_choice * 60))
+    else
+        INACTIVITY_TIMEOUT=300  # Default 5 minutes
+    fi
+    
+    echo ""
+    read -p "Timer monitoring interval in minutes (how often to check, default=5): " interval_choice
+    if [[ "$interval_choice" =~ ^[0-9]+$ ]] && [ "$interval_choice" -gt 0 ]; then
+        TIMER_INTERVAL="$interval_choice"
+    else
+        TIMER_INTERVAL=5  # Default 5 minutes
+    fi
+}
+
+# Apply disk management configuration
+apply_disk_config() {
+    if [ -f "$CONFIG_DIR/disk-manager.conf" ]; then
+        log "Applying custom disk management settings..."
+        
+        # Update whitelist expiration
+        sed -i "s/^WHITELIST_DEFAULT_EXPIRY=.*/WHITELIST_DEFAULT_EXPIRY=$WHITELIST_EXPIRY/" "$CONFIG_DIR/disk-manager.conf"
+        
+        # Update battery-only setting
+        sed -i "s/^SUSPEND_ON_BATTERY_ONLY=.*/SUSPEND_ON_BATTERY_ONLY=$SUSPEND_ON_BATTERY_ONLY/" "$CONFIG_DIR/disk-manager.conf"
+        
+        # Update inactivity timeout
+        sed -i "s/^INACTIVITY_TIMEOUT=.*/INACTIVITY_TIMEOUT=$INACTIVITY_TIMEOUT/" "$CONFIG_DIR/disk-manager.conf"
+        
+        # Update timer interval
+        sed -i "s/^TIMER_INTERVAL=.*/TIMER_INTERVAL=$TIMER_INTERVAL/" "$CONFIG_DIR/disk-manager.conf"
+        
+        success "Disk management configuration applied"
+    fi
+}
+
+# Fix systemd service timeout
+fix_service_timeout() {
+    if [ "$INSTALL_SERVICES" = true ]; then
+        log "Optimizing systemd service configuration..."
+        
+        # Fix disk-monitor service timeout
+        if [ -f "$SERVICE_DIR/disk-monitor.service" ]; then
+            sudo sed -i 's/TimeoutStartSec=60/TimeoutStartSec=600/' "$SERVICE_DIR/disk-monitor.service"
+        fi
+        
+        # Update timer interval if configured
+        if [ -n "$TIMER_INTERVAL" ] && [ -f "$SERVICE_DIR/disk-monitor.timer" ]; then
+            sudo sed -i "s/OnUnitActiveSec=.*min/OnUnitActiveSec=${TIMER_INTERVAL}min/" "$SERVICE_DIR/disk-monitor.timer"
+        fi
+        
+        sudo systemctl daemon-reload
+        success "Service configuration optimized"
     fi
 }
 
@@ -360,6 +480,13 @@ interactive_config() {
         [Nn]* ) INSTALL_SERVICES=false ;;
         * ) INSTALL_SERVICES=true ;;
     esac
+    
+    echo ""
+    read -p "Configure disk management settings? (Y/n): " disk_config
+    case "$disk_config" in
+        [Nn]* ) ;; # Skip disk configuration
+        * ) configure_disk_management ;;
+    esac
 }
 
 # Main installation function
@@ -387,7 +514,9 @@ main() {
     install_envycontrol
     install_scripts
     install_configs
+    apply_disk_config
     install_services
+    fix_service_timeout
     configure_tlp
     install_aliases
     

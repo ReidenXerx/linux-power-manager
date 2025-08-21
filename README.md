@@ -2,11 +2,26 @@
 
 🔋 **Universal Power Management System for Linux**
 
-A comprehensive, cross-distribution power management solution that provides intelligent power presets, TLP integration, GPU switching, and hibernation support for Linux laptops and desktops.
+A comprehensive, cross-distribution power management solution that provides intelligent power presets, TLP integration, GPU switching, disk management, and hibernation support for Linux laptops and desktops.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Shell Script](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
 [![Supported Distributions](https://img.shields.io/badge/Distros-Ubuntu%20%7C%20Fedora%20%7C%20Arch%20%7C%20openSUSE-blue.svg)](#supported-distributions)
+
+## 📖 Table of Contents
+
+**Quick Navigation:**
+- [✨ Features](#-features) - What this tool can do
+- [🚀 Quick Start](#-quick-start) - Get up and running fast
+- [📖 Core Modules](#-core-modules) - Detailed module documentation
+  - [⚡ Power Presets](#-power-presets) - Smart power management
+  - [🎮 GPU Switching](#-gpu-switching-nvidia-laptops) - NVIDIA GPU control
+  - [💾 Disk Management](#-disk-management) - Automatic disk suspension
+  - [🌙 Hibernation](#-hibernation-support) - Secure hibernation
+- [🎯 Usage Examples](#-usage-examples) - Real-world examples
+- [⚙️ Configuration](#️-configuration) - Customize your setup
+- [🛠️ Troubleshooting](#️-troubleshooting) - Fix common issues
+- [🤝 Contributing](#-contributing) - Help improve the project
 
 ## ✨ Features
 
@@ -170,6 +185,299 @@ The installer automatically detects your distribution and uses the appropriate p
 
 All dependencies are automatically installed by the installer.
 
+## 📖 Core Modules
+
+### ⚡ Power Presets
+
+The heart of Linux Power Manager - intelligent power management with 9 built-in presets.
+
+#### Quick Commands
+```bash
+# Show current status
+power-control.sh status
+
+# List all available presets
+power-control.sh list-presets
+
+# Apply specific presets
+power-control.sh ultra-eco        # Maximum battery life
+power-control.sh balanced         # Default balanced mode
+power-control.sh gaming-max       # Maximum performance
+
+# Interactive selection
+power-status.sh select-preset
+```
+
+#### Preset Details
+
+**Ultra Eco Mode** (`ultra-eco`)
+- **Purpose**: Maximum battery life
+- **TLP Mode**: Battery optimized
+- **GPU**: Integrated only
+- **Power Profile**: Power-saver
+- **Best for**: Long flights, all-day battery life
+
+**Gaming Max** (`gaming-max`)
+- **Purpose**: Maximum gaming performance
+- **TLP Mode**: AC power optimized
+- **GPU**: Discrete NVIDIA only
+- **Power Profile**: Performance
+- **Best for**: AAA gaming, GPU-intensive tasks
+
+**Balanced** (`balanced`) - *Default*
+- **Purpose**: General daily use
+- **TLP Mode**: Automatic switching
+- **GPU**: Hybrid (intelligent switching)
+- **Power Profile**: Balanced
+- **Best for**: Productivity, web browsing, light development
+
+#### TLP Integration
+- **Automatic Configuration**: Presets automatically configure TLP settings
+- **Conflict Resolution**: Handles power-profiles-daemon conflicts
+- **Real-time Updates**: TLP settings applied instantly
+- **Custom TLP**: Supports custom TLP configurations
+
+---
+
+### 🎮 GPU Switching (NVIDIA Laptops)
+
+Seamless switching between Intel iGPU and NVIDIA dGPU for optimal power/performance balance.
+
+#### Prerequisites
+```bash
+# Install envycontrol (handled by installer)
+sudo pip install envycontrol
+
+# Enable GPU switching
+power-control.sh config
+# Set GPU_SWITCHING_ENABLED=true
+```
+
+#### GPU Modes
+
+**Integrated Mode** (`gpu-integrated`)
+- **GPUs Active**: Intel iGPU only
+- **Power Usage**: Lowest (~5-15W)
+- **Performance**: Basic graphics, good for productivity
+- **Battery Life**: Maximum (8-12+ hours)
+- **Reboot**: Required to switch
+
+**Hybrid Mode** (`gpu-hybrid`) - *Recommended*
+- **GPUs Active**: Both Intel + NVIDIA
+- **Power Usage**: Dynamic (5-40W+ based on load)
+- **Performance**: Automatic GPU switching per application
+- **Battery Life**: Good (4-8 hours)
+- **Reboot**: Not required for most switches
+
+**Discrete Mode** (`gpu-nvidia`)
+- **GPUs Active**: NVIDIA dGPU only
+- **Power Usage**: Highest (15-50W+ constant)
+- **Performance**: Maximum graphics performance
+- **Battery Life**: Reduced (2-4 hours)
+- **Reboot**: Required to switch
+
+#### Commands
+```bash
+# Check current GPU status
+power-control.sh gpu-status
+envycontrol --query
+
+# Switch GPU modes
+power-control.sh gpu-integrated    # Intel iGPU only
+power-control.sh gpu-hybrid        # Hybrid mode (both GPUs)
+power-control.sh gpu-nvidia        # NVIDIA dGPU only
+
+# GPU info and monitoring
+nvidia-smi                         # NVIDIA GPU stats
+intel_gpu_top                      # Intel iGPU stats (if installed)
+```
+
+#### Smart GPU Selection
+Presets automatically select optimal GPU modes:
+- **Ultra Eco/Work Mode**: Forces Integrated
+- **Gaming Max/Performance**: Uses Discrete
+- **Balanced Modes**: Uses Hybrid
+- **Manual Override**: Can override preset GPU selection
+
+---
+
+### 💾 Disk Management
+
+Automatically suspend inactive storage devices to save power, especially useful for laptops with multiple drives.
+
+#### Features
+- **Automatic Suspension**: Suspend inactive disks after configurable timeout
+- **Smart Whitelisting**: Temporarily protect disks from suspension
+- **Never-Expire Protection**: Permanently protect critical disks
+- **System Disk Protection**: Automatically excludes system/boot disks
+- **Battery-Only Mode**: Only suspend disks when on battery power
+- **NVMe + SATA Support**: Works with modern NVMe and traditional SATA drives
+
+#### Quick Start
+```bash
+# Check disk management status
+disk-manager.sh status
+
+# List all available disks
+disk-manager.sh list
+
+# Configure disk management
+disk-manager.sh config
+
+# Manually suspend a disk
+disk-manager.sh suspend nvme1n1
+
+# Wake up a disk (auto-protects from suspension)
+disk-manager.sh wake nvme1n1
+```
+
+#### Configuration (`~/.config/disk-manager.conf`)
+```bash
+# Enable disk management
+DISK_MANAGEMENT_ENABLED=true
+AUTO_SUSPEND_ENABLED=true
+
+# Suspend after 5 minutes of inactivity
+INACTIVITY_TIMEOUT=300
+
+# Only suspend on battery (recommended)
+SUSPEND_ON_BATTERY_ONLY=true
+
+# Auto-detect non-system disks
+MONITORED_DISKS="auto"
+EXCLUDE_SYSTEM_DISK=true
+
+# Whitelist default duration (1 hour)
+WHITELIST_DEFAULT_EXPIRY=3600
+```
+
+#### Whitelist System
+Protect disks from automatic suspension:
+
+```bash
+# Show current whitelist
+disk-manager.sh whitelist
+
+# Add disk to whitelist (default: 1 hour)
+disk-manager.sh whitelist-add nvme1n1
+
+# Add disk with custom duration (2 hours)
+disk-manager.sh whitelist-add nvme1n1 7200
+
+# Add disk with never-expire protection
+disk-manager.sh whitelist-add nvme1n1 0
+
+# Remove from whitelist
+disk-manager.sh whitelist-remove nvme1n1
+
+# Clear entire whitelist
+disk-manager.sh whitelist-clear
+```
+
+#### Monitoring
+```bash
+# Run one-time monitoring cycle
+disk-manager.sh monitor
+
+# Start continuous monitoring daemon (24h auto-stop)
+disk-manager.sh monitor-daemon
+
+# Stop monitoring daemon
+disk-manager.sh stop-daemon
+
+# Check if disk is sleeping
+disk-manager.sh sleeping nvme1n1
+
+# Check disk activity
+disk-manager.sh activity nvme1n1
+```
+
+#### Power Savings
+- **NVMe Drives**: Can save 2-5W per drive when suspended
+- **SATA Drives**: Can save 3-8W per drive when suspended
+- **Multiple Drives**: Savings scale with number of drives
+- **Battery Impact**: Can extend battery life by 30-60 minutes
+
+#### Safety Features
+- **System Disk Protection**: Never suspends system/boot drives
+- **Whitelist Override**: Manual wake-up auto-protects disks
+- **Never-Expire Support**: Critical disks can be permanently protected
+- **Activity Detection**: Only suspends truly inactive drives
+- **Graceful Handling**: Proper filesystem sync before suspension
+
+---
+
+### 🌙 Hibernation Support
+
+Secure hibernation with LUKS encryption and intelligent power management.
+
+#### Features
+- **Encrypted Hibernation**: LUKS-encrypted swap for security
+- **Dynamic Swap**: Automatic swap file creation/management
+- **Battery-Aware**: Disable swap on battery to save power
+- **Resume Support**: Reliable wake-from-hibernation
+- **Space Management**: Automatic swap size calculation
+
+#### Setup
+```bash
+# Enable hibernation
+power-control.sh config
+# Set HIBERNATION_ENABLED=true
+
+# Check hibernation status
+power-control.sh hibstatus
+
+# Test hibernation (recommended)
+sudo systemctl hibernate
+```
+
+#### Configuration (`~/.config/power-control.conf`)
+```bash
+# Enable hibernation support
+HIBERNATION_ENABLED=true
+
+# Disable swap on battery (saves ~200-500MB RAM)
+DISABLE_SWAP_ON_BATTERY=true
+
+# Custom swap file location (optional)
+# HIBERNATION_SWAP_FILE=/swapfile
+
+# Custom swap size (auto-calculated by default)
+# HIBERNATION_SWAP_SIZE=8G
+```
+
+#### Commands
+```bash
+# Check hibernation status and configuration
+power-control.sh hibstatus
+
+# Manual hibernation
+sudo systemctl hibernate
+
+# Check swap status
+swapon --show
+free -h
+
+# Check hibernation capabilities
+cat /sys/power/disk
+cat /proc/swaps
+```
+
+#### How It Works
+1. **Encrypted Swap**: Creates LUKS-encrypted swap file
+2. **Kernel Configuration**: Updates GRUB with resume parameters
+3. **Dynamic Management**: Enables swap only when needed
+4. **Power Savings**: Disables swap on battery to save RAM power
+5. **Secure Resume**: Encrypted swap protects hibernated data
+
+#### Power Savings
+- **Hibernation vs Sleep**: Uses 0W vs 3-8W in sleep mode
+- **Long-term Storage**: Perfect for overnight or multi-day storage
+- **Swap Disable**: Saves 200-500MB RAM power on battery
+- **Fast Resume**: Typically 10-30 seconds to full resume
+
+---
+
 ## ⚙️ Configuration
 
 ### Main Configuration (`~/.config/power-control.conf`)
@@ -224,14 +532,34 @@ MY_PRESET_DESCRIPTION="My custom power profile"
 
 ## 🛠️ Troubleshooting
 
-### Common Issues
+### Power Management Issues
 
 **TLP conflicts with power-profiles-daemon**
 ```bash
 # Automatic fix during installation, or manual fix:
 sudo systemctl mask power-profiles-daemon.service
 sudo systemctl restart tlp.service
+
+# Verify TLP is working
+sudo tlp-stat | head -20
 ```
+
+**Preset not applying**
+```bash
+# Check preset exists
+power-control.sh list-presets
+
+# Check current configuration
+power-control.sh status
+
+# Reset to default configuration
+cp /usr/local/share/power-manager/power-control.conf.default ~/.config/power-control.conf
+
+# Reapply preset
+power-control.sh balanced
+```
+
+### GPU Switching Issues
 
 **GPU switching not working**
 ```bash
@@ -241,28 +569,168 @@ power-control.sh config
 
 # Check envycontrol status
 envycontrol --query
+
+# Check NVIDIA driver installation
+nvidia-smi
+lspci | grep -i nvidia
+
+# Reset GPU configuration
+sudo envycontrol --reset
 ```
+
+**Reboot required but system won't reboot**
+```bash
+# Force reboot for GPU switch
+sudo systemctl reboot
+
+# Check if switch completed after reboot
+power-control.sh gpu-status
+```
+
+### Disk Management Issues
+
+**Disks not being detected**
+```bash
+# Check disk management status
+disk-manager.sh status
+
+# List all available disks
+lsblk
+disk-manager.sh list
+
+# Check configuration
+cat ~/.config/disk-manager.conf
+```
+
+**Disks not suspending**
+```bash
+# Check if disk management is enabled
+disk-manager.sh status
+
+# Verify disk is monitored
+disk-manager.sh list
+
+# Check if disk is whitelisted
+disk-manager.sh whitelist
+
+# Manual suspend test
+disk-manager.sh suspend nvme1n1
+
+# Check disk activity
+disk-manager.sh activity nvme1n1
+```
+
+**System disk being suspended (DANGEROUS)**
+```bash
+# This should never happen, but if it does:
+# 1. Immediately wake the system disk
+disk-manager.sh wake nvme0n1  # or whatever your system disk is
+
+# 2. Add system disk to permanent whitelist
+disk-manager.sh whitelist-add nvme0n1 0  # 0 = never expire
+
+# 3. Check system disk detection
+disk-manager.sh system-disk
+
+# 4. Ensure system disk exclusion is enabled
+disk-manager.sh config
+# Set EXCLUDE_SYSTEM_DISK=true
+```
+
+**Disk won't wake up**
+```bash
+# Try multiple wake attempts
+disk-manager.sh wake nvme1n1
+sudo dd if=/dev/nvme1n1 of=/dev/null bs=512 count=1
+
+# Check if disk is physically responding
+sudo dmesg | tail -20
+lsblk
+
+# For NVMe drives
+sudo nvme list
+sudo nvme get-feature -f 0x02 /dev/nvme1n1
+
+# For SATA drives
+sudo hdparm -C /dev/sdb
+```
+
+**Monitoring daemon issues**
+```bash
+# Check if daemon is running
+ps aux | grep disk-manager
+
+# Stop stuck daemon
+disk-manager.sh stop-daemon
+
+# Check daemon logs
+journalctl | grep disk-manager
+
+# Restart with debugging
+disk-manager.sh monitor  # Single run for testing
+```
+
+### Hibernation Issues
 
 **Hibernation not working**
 ```bash
 # Check hibernation status
 power-control.sh hibstatus
 
-# Configure hibernation
+# Enable hibernation
 power-control.sh config
 # Set HIBERNATION_ENABLED=true
+
+# Check swap configuration
+swapon --show
+free -h
+
+# Check hibernation support
+cat /sys/power/disk
+ls -la /proc/swaps
 ```
 
-**Preset not applying**
+**Resume from hibernation fails**
 ```bash
-# Check preset exists
-power-control.sh list-presets
+# Check GRUB configuration
+sudo cat /proc/cmdline | grep resume
 
-# Check configuration
-power-control.sh status
+# Verify swap UUID
+sudo blkid | grep swap
 
-# Reset configuration
-cp /usr/local/share/power-manager/power-control.conf.default ~/.config/power-control.conf
+# Check hibernation image
+sudo cat /sys/power/image_size
+sudo cat /sys/power/reserved_size
+```
+
+### System Integration Issues
+
+**Aliases not working**
+```bash
+# Reload bash configuration
+source ~/.bashrc
+
+# Check if aliases were installed
+grep -i power ~/.bashrc
+
+# Manual alias installation
+echo 'alias power-status="power-status.sh"' >> ~/.bashrc
+echo 'alias power-eco="power-control.sh ultra-eco"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**Services not starting**
+```bash
+# Check service status
+systemctl status power-control-startup.service
+systemctl status power-control-wake.service
+
+# Enable services
+sudo systemctl enable power-control-startup.service
+sudo systemctl enable power-control-wake.service
+
+# View service logs
+journalctl -u power-control-startup.service -n 50
 ```
 
 ### Logs and Debugging

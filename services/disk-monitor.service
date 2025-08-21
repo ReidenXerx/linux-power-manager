@@ -1,0 +1,16 @@
+[Unit]
+Description=Disk Management Monitor Service
+Documentation=https://github.com/username/linux-power-manager
+After=multi-user.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/disk-manager.sh monitor
+RemainAfterExit=no
+TimeoutStartSec=60
+User=root
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target

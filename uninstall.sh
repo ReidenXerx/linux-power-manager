@@ -54,19 +54,19 @@ remove_services() {
     log "Removing systemd services..."
     
     # Stop and disable services
-    for service in power-control-startup power-control-wake power-control-monitor; do
-        if systemctl is-enabled "${service}.service" >/dev/null 2>&1; then
+    for service in power-control-startup power-control-wake power-control-monitor disk-monitor; do
+        if systemctl is-enabled "${service}.service" > /dev/null 2>&1; then
             sudo systemctl disable "${service}.service"
             info "Disabled ${service}.service"
         fi
-        if systemctl is-enabled "${service}.timer" >/dev/null 2>&1; then
+        if systemctl is-enabled "${service}.timer" > /dev/null 2>&1; then
             sudo systemctl disable "${service}.timer"
             info "Disabled ${service}.timer"
         fi
     done
     
     # Remove service files
-    for file in power-control-startup.service power-control-wake.service power-control-monitor.service power-control-monitor.timer; do
+    for file in power-control-startup.service power-control-wake.service power-control-monitor.service power-control-monitor.timer disk-monitor.service disk-monitor.timer; do
         if [ -f "$SERVICE_DIR/$file" ]; then
             sudo rm "$SERVICE_DIR/$file"
             info "Removed $file"
@@ -81,7 +81,7 @@ remove_services() {
 remove_scripts() {
     log "Removing power management scripts..."
     
-    for script in power-control.sh power-status.sh; do
+    for script in power-control.sh power-status.sh disk-manager.sh; do
         if [ -f "$INSTALL_PREFIX/$script" ]; then
             sudo rm "$INSTALL_PREFIX/$script"
             info "Removed $script"
@@ -195,6 +195,7 @@ confirm_removal() {
     
     echo -e "${YELLOW}This will remove:${NC}"
     echo "  • Power management scripts"
+    echo "  • Disk management scripts"
     echo "  • Systemd services and timers"
     echo "  • Bash aliases"
     echo "  • Configuration files (optional)"
