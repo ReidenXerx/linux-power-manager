@@ -43,6 +43,14 @@ A comprehensive, cross-distribution power management solution that provides inte
 - **Power-Aware**: Automatic GPU selection based on power preset
 - **Safe Operations**: Prevents accidental switches with confirmation prompts
 
+### 💾 **Disk Management**
+- **Automatic Suspension**: Suspend inactive disks to save 2-8W per drive
+- **Smart Whitelisting**: Temporarily or permanently protect disks from suspension
+- **System Disk Protection**: Never suspends critical system/boot drives
+- **Battery-Aware**: Only suspend disks when on battery power for maximum savings
+- **NVMe + SATA Support**: Works with modern NVMe and traditional SATA drives
+- **Monitoring Daemon**: Continuous background monitoring with safety limits
+
 ### 🌙 **Hibernation Support**
 - **Encrypted Swap**: Secure hibernation with LUKS encryption
 - **Automatic Management**: Dynamic swap activation/deactivation

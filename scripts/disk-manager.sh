@@ -205,32 +205,21 @@ get_disk_activity() {
     fi
 }
 
-# Check if disk is currently suspended/sleeping
-is_disk_sleeping() {
+# Check if disk is in deep sleep mode (actively suspended by us)
+is_disk_deep_sleeping() {
     local disk="$1"
     
-    # For NVMe drives, check power state using nvme-cli
-    if [[ "$disk" == nvme* ]] && command -v nvme > /dev/null 2>&1; then
-        local power_state=$(sudo nvme get-feature -f 0x02 "/dev/$disk" 2>/dev/null | sed -n 's/.*Current value:0x0*\([0-9a-f]*\).*/\1/p' | tail -c 2)
-        # Convert hex to decimal for power state comparison
-        local power_state_dec=$((0x${power_state:-0}))
-        # Power states > 0 indicate low power modes (state 0 = active, >0 = various low power states)
-        if [ "$power_state_dec" -gt 0 ] 2>/dev/null; then
-            return 0
-        else
-            return 1
-        fi
-    elif [[ "$disk" == nvme* ]]; then
-        # Fallback: check runtime PM status
+    # For NVMe drives, check if power control is set to auto (our suspend method)
+    if [[ "$disk" == nvme* ]]; then
         local nvme_path="/sys/block/$disk/device"
-        if [ -f "$nvme_path/power/runtime_status" ]; then
-            local runtime_status=$(cat "$nvme_path/power/runtime_status" 2>/dev/null || echo "unsupported")
-            [ "$runtime_status" = "suspended" ]
+        if [ -f "$nvme_path/power/control" ]; then
+            local power_control=$(cat "$nvme_path/power/control" 2>/dev/null || echo "unknown")
+            [ "$power_control" = "auto" ]
         else
             return 1
         fi
     else
-        # For SATA drives, use hdparm if available
+        # For SATA drives, use hdparm to check drive state
         if command -v hdparm > /dev/null 2>&1; then
             local state=$(sudo hdparm -C "/dev/$disk" 2>/dev/null | grep "drive state" | awk '{print $NF}')
             [ "$state" = "standby" ] || [ "$state" = "sleeping" ]
@@ -238,6 +227,51 @@ is_disk_sleeping() {
             return 1
         fi
     fi
+}
+
+# Check if disk is in smart sleep mode (autonomous power management)
+is_disk_smart_sleeping() {
+    local disk="$1"
+    
+    # For NVMe drives, check if power state > 0 but power control is "on"
+    if [[ "$disk" == nvme* ]] && command -v nvme > /dev/null 2>&1; then
+        local nvme_path="/sys/block/$disk/device"
+        local power_control=$(cat "$nvme_path/power/control" 2>/dev/null || echo "unknown")
+        
+        # Only consider smart sleeping if power control is "on" (not suspended by us)
+        if [ "$power_control" = "on" ]; then
+            local power_state=$(sudo nvme get-feature -f 0x02 "/dev/$disk" 2>/dev/null | sed -n 's/.*Current value:0x0*\([0-9a-f]*\).*/\1/p' | tail -c 2)
+            local power_state_dec=$((0x${power_state:-0}))
+            # Power states > 0 indicate autonomous low power modes
+            [ "$power_state_dec" -gt 0 ] 2>/dev/null
+        else
+            return 1
+        fi
+    else
+        # SATA drives don't typically have autonomous power management like NVMe
+        return 1
+    fi
+}
+
+# Get detailed disk sleep status
+get_disk_sleep_status() {
+    local disk="$1"
+    
+    if is_disk_deep_sleeping "$disk"; then
+        echo "deep-sleeping"
+    elif is_disk_smart_sleeping "$disk"; then
+        echo "smart-sleeping"
+    else
+        echo "active"
+    fi
+}
+
+# Legacy function for backward compatibility
+is_disk_sleeping() {
+    local disk="$1"
+    
+    # Return true if disk is either deep sleeping or smart sleeping
+    is_disk_deep_sleeping "$disk" || is_disk_smart_sleeping "$disk"
 }
 
 # ============================================================================
@@ -653,13 +687,20 @@ show_disk_status() {
         for disk in "${monitored_disks[@]}"; do
             if is_disk_manageable "$disk"; then
                 local disk_info=$(get_disk_info "$disk")
+                local sleep_status_detail=$(get_disk_sleep_status "$disk")
                 local sleep_status="❓ Unknown"
                 
-                if is_disk_sleeping "$disk"; then
-                    sleep_status="💤 Sleeping"
-                else
-                    sleep_status="⚡ Active"
-                fi
+                case "$sleep_status_detail" in
+                    "deep-sleeping")
+                        sleep_status="💤 Deep Sleep"
+                        ;;
+                    "smart-sleeping")
+                        sleep_status="😴 Smart Sleep"
+                        ;;
+                    "active")
+                        sleep_status="⚡ Active"
+                        ;;
+                esac
                 
                 echo -e "${PURPLE}║${NC}   $disk: $sleep_status                                           ${PURPLE}║${NC}"
                 echo -e "${PURPLE}║${NC}     $disk_info                                               ${PURPLE}║${NC}"
@@ -704,11 +745,18 @@ list_disks() {
             status_info=" ${YELLOW}[SYSTEM DISK]${NC}"
         fi
         
-        if is_disk_sleeping "$disk"; then
-            status_info="$status_info ${BLUE}[SLEEPING]${NC}"
-        else
-            status_info="$status_info ${GREEN}[ACTIVE]${NC}"
-        fi
+        local sleep_status_detail=$(get_disk_sleep_status "$disk")
+        case "$sleep_status_detail" in
+            "deep-sleeping")
+                status_info="$status_info ${BLUE}[DEEP SLEEP]${NC}"
+                ;;
+            "smart-sleeping")
+                status_info="$status_info ${MAGENTA}[SMART SLEEP]${NC}"
+                ;;
+            "active")
+                status_info="$status_info ${GREEN}[ACTIVE]${NC}"
+                ;;
+        esac
         
         echo -e "${CYAN}$disk${NC}: $disk_info$status_info"
     done

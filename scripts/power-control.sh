@@ -70,7 +70,7 @@ BALANCED_DESCRIPTION="Balanced performance and efficiency"
 
 # Balanced with dGPU - Your requested preset
 BALANCED_DGPU_TLP_MODE=balanced
-BALANCED_DGPU_GPU_MODE=hybrid
+BALANCED_DGPU_GPU_MODE=nvidia
 BALANCED_DGPU_POWER_PROFILE=balanced
 BALANCED_DGPU_DESCRIPTION="Balanced mode with discrete GPU capabilities"
 
@@ -159,6 +159,57 @@ has_disk_manager() { [ -x "$(dirname "$0")/disk-manager.sh" ] || [ -x "/usr/loca
 # GPU MANAGEMENT FUNCTIONS
 # ============================================================================
 
+# NVIDIA GPU Performance Optimization Functions
+set_nvidia_performance_mode() {
+    local mode="$1"  # eco, balanced, performance
+
+    if ! command -v nvidia-smi > /dev/null 2>&1; then
+        return 0  # Skip if NVIDIA not available
+    fi
+
+    case "$mode" in
+        "eco"|"power-saver")
+            log "Setting NVIDIA GPU to eco mode..."
+            # Disable persistent mode for maximum power saving
+            sudo nvidia-smi -pm 0 2>/dev/null || true
+            # Reset to auto clocks (lowest power)
+            sudo nvidia-smi -rac 2>/dev/null || true
+            success "NVIDIA GPU set to power-saving mode (auto clocks)"
+            ;;
+        "balanced")
+            log "Setting NVIDIA GPU to balanced mode..."
+            # Enable persistent mode but use auto clocks
+            sudo nvidia-smi -pm 1 2>/dev/null || true
+            sudo nvidia-smi -rac 2>/dev/null || true
+            success "NVIDIA GPU set to balanced mode (persistent + auto clocks)"
+            ;;
+        "performance"|"gaming")
+            log "Setting NVIDIA GPU to maximum performance..."
+            # Enable persistent mode
+            sudo nvidia-smi -pm 1 2>/dev/null || true
+            # Set maximum memory clock, let graphics auto-boost
+            sudo nvidia-smi -ac 8001,3105 2>/dev/null || warning "Could not set application clocks - using automatic boost"
+            # Set maximum power limit if possible
+            sudo nvidia-smi -pl 140 2>/dev/null || true
+            success "NVIDIA GPU set to maximum performance mode (8001MHz mem, 140W limit)"
+            ;;
+    esac
+}
+
+# Get NVIDIA GPU status for display
+get_nvidia_status() {
+    if ! command -v nvidia-smi > /dev/null 2>&1; then
+        echo "Not available"
+        return 0
+    fi
+
+    local power_draw=$(nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null || echo "N/A")
+    local gpu_clock=$(nvidia-smi --query-gpu=clocks.current.graphics --format=csv,noheader,nounits 2>/dev/null || echo "N/A")
+    local mem_clock=$(nvidia-smi --query-gpu=clocks.current.memory --format=csv,noheader,nounits 2>/dev/null || echo "N/A")
+
+    echo "${power_draw}W, GPU:${gpu_clock}MHz, Mem:${mem_clock}MHz"
+}
+
 get_current_gpu_mode() {
     if has_envycontrol; then
         envycontrol --query 2>/dev/null || echo "unknown"
@@ -170,25 +221,25 @@ get_current_gpu_mode() {
 set_gpu_mode() {
     local mode="$1"
     local reboot_required=false
-    
+
     if [ "$GPU_SWITCHING_ENABLED" != "true" ]; then
         info "GPU switching disabled in config - skipping GPU mode change"
         return 0
     fi
-    
+
     if ! has_envycontrol; then
         warning "envycontrol not available - skipping GPU mode change"
         return 1
     fi
-    
+
     local current_mode=$(get_current_gpu_mode)
     if [ "$current_mode" = "$mode" ]; then
         info "GPU already in $mode mode"
         return 0
     fi
-    
+
     log "Switching GPU mode from $current_mode to $mode..."
-    
+
     case "$mode" in
         "integrated"|"intel")
             if sudo envycontrol -s integrated --force-comp --coolbits 24 > /dev/null 2>&1; then
@@ -222,38 +273,38 @@ set_gpu_mode() {
             return 1
             ;;
     esac
-    
+
     if [ "$reboot_required" = "true" ]; then
         warning "⚠️  GPU mode change requires reboot to take effect"
         echo "   ${CYAN}Run 'sudo reboot' when ready${NC}"
     fi
-    
+
     return 0
 }
 
 # ============================================================================
-# TLP INTEGRATION FUNCTIONS  
+# TLP INTEGRATION FUNCTIONS
 # ============================================================================
 
 should_use_tlp() {
     local desktop=$(detect_desktop)
-    
+
     # Only use TLP if enabled in config
     if [ "$TLP_INTEGRATION_ENABLED" != "true" ]; then
         return 1
     fi
-    
+
     # Check if TLP is available
     if ! has_tlp; then
         return 1
     fi
-    
+
     # If configured to only use on GNOME, check desktop
     if [ "$TLP_ONLY_ON_GNOME" = "true" ] && [ "$desktop" != "gnome" ]; then
         info "TLP integration disabled on $desktop (TLP_ONLY_ON_GNOME=true)"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -298,11 +349,11 @@ tlp_apply_settings() {
 
 tlp_set_mode() {
     local mode="$1"
-    
+
     if ! should_use_tlp; then
         return 0
     fi
-    
+
     case "$mode" in
         "ac"|"performance")
             log "Switching TLP to AC/Performance mode..."
@@ -341,33 +392,33 @@ get_power_profile() {
         echo "$(powerprofilesctl get)"
         return 0
     fi
-    
+
     # GNOME-specific method
     if [ "$(detect_desktop)" = "gnome" ] && has_gsettings; then
         local profile=$(gsettings get org.gnome.settings-daemon.plugins.power power-button-action 2>/dev/null || echo "unknown")
         echo "gnome:$profile"
         return 0
     fi
-    
+
     # KDE-specific method
     if [ "$(detect_desktop)" = "kde" ] && command -v kreadconfig5 > /dev/null 2>&1; then
         local profile=$(kreadconfig5 --file powermanagementprofilesrc --group AC --key icon 2>/dev/null || echo "unknown")
         echo "kde:$profile"
         return 0
     fi
-    
+
     echo "unknown"
 }
 
 set_power_profile() {
     local mode="$1"
     local desktop=$(detect_desktop)
-    
+
     case "$mode" in
         "power-saver"|"eco")
             # Apply TLP battery mode first for deeper power savings
             tlp_set_mode "bat"
-            
+
             if has_powerprofilesctl; then
                 powerprofilesctl set power-saver
                 success "Set power profile to power-saver via powerprofilesctl"
@@ -380,7 +431,7 @@ set_power_profile() {
                 warning "Unable to set power profile - no suitable method found"
                 return 1
             fi
-            
+
             # Apply additional eco mode settings
             if [ -f "$SCRIPT_DIR/eco-mode.sh" ]; then
                 "$SCRIPT_DIR/eco-mode.sh"
@@ -389,7 +440,7 @@ set_power_profile() {
         "performance")
             # Apply TLP AC mode first
             tlp_set_mode "ac"
-            
+
             if has_powerprofilesctl; then
                 powerprofilesctl set performance
                 success "Set power profile to performance via powerprofilesctl"
@@ -402,7 +453,7 @@ set_power_profile() {
                 warning "Unable to set power profile - no suitable method found"
                 return 1
             fi
-            
+
             # Apply additional performance mode settings
             if [ -f "$SCRIPT_DIR/performance-mode.sh" ]; then
                 "$SCRIPT_DIR/performance-mode.sh"
@@ -411,7 +462,7 @@ set_power_profile() {
         "balanced")
             # Use balanced TLP mode (auto-detect AC/BAT)
             tlp_apply_settings
-            
+
             if has_powerprofilesctl; then
                 powerprofilesctl set balanced
                 success "Set power profile to balanced via powerprofilesctl"
@@ -444,20 +495,20 @@ get_available_presets() {
 get_preset_info() {
     local preset="$1"
     local preset_upper=$(echo "$preset" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-    
+
     local tlp_var="${preset_upper}_TLP_MODE"
     local gpu_var="${preset_upper}_GPU_MODE"
     local profile_var="${preset_upper}_POWER_PROFILE"
     local desc_var="${preset_upper}_DESCRIPTION"
-    
+
     # Source the presets file again to get latest values
     source "$PRESETS_FILE" 2>/dev/null
-    
+
     local tlp_mode=$(eval echo \$${tlp_var})
     local gpu_mode=$(eval echo \$${gpu_var})
     local power_profile=$(eval echo \$${profile_var})
     local description=$(eval echo "\$${desc_var}")
-    
+
     echo "TLP_MODE=$tlp_mode"
     echo "GPU_MODE=$gpu_mode"
     echo "POWER_PROFILE=$power_profile"
@@ -467,7 +518,7 @@ get_preset_info() {
 apply_preset() {
     local preset="$1"
     local preset_upper=$(echo "$preset" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-    
+
     # Check if preset exists
     if ! grep -q "^${preset_upper}_DESCRIPTION=" "$PRESETS_FILE" 2>/dev/null; then
         error "Preset '$preset' not found"
@@ -475,75 +526,93 @@ apply_preset() {
         get_available_presets
         return 1
     fi
-    
+
     info "Applying power preset: $preset"
-    
+
     # Get preset configuration
     local preset_info=$(get_preset_info "$preset")
-    
+
     # Parse the preset info line by line instead of eval
     local TLP_MODE=$(echo "$preset_info" | grep "^TLP_MODE=" | cut -d'=' -f2)
     local GPU_MODE=$(echo "$preset_info" | grep "^GPU_MODE=" | cut -d'=' -f2)
     local POWER_PROFILE=$(echo "$preset_info" | grep "^POWER_PROFILE=" | cut -d'=' -f2)
     local DESCRIPTION=$(echo "$preset_info" | grep "^DESCRIPTION=" | cut -d'=' -f2-)
-    
+
     echo -e "${MAGENTA}🎯 Applying preset: $preset${NC}"
     echo "   Description: $DESCRIPTION"
     echo "   TLP Mode: ${YELLOW}$TLP_MODE${NC}"
     echo "   GPU Mode: ${YELLOW}$GPU_MODE${NC}"
     echo "   Power Profile: ${YELLOW}$POWER_PROFILE${NC}"
     echo ""
-    
+
     local errors=0
-    
+
     # Apply TLP mode first
     if [ -n "$TLP_MODE" ] && [ "$TLP_MODE" != "none" ]; then
         tlp_set_mode "$TLP_MODE" || ((errors++))
     fi
-    
+
     # Apply GPU mode (potentially requiring reboot)
     if [ -n "$GPU_MODE" ] && [ "$GPU_MODE" != "none" ]; then
         set_gpu_mode "$GPU_MODE" || ((errors++))
     fi
-    
+
     # Apply system power profile
     if [ -n "$POWER_PROFILE" ] && [ "$POWER_PROFILE" != "none" ]; then
         set_power_profile "$POWER_PROFILE" || ((errors++))
     fi
-    
+
+    # Apply NVIDIA performance settings based on GPU mode and power profile
+    if [ -n "$GPU_MODE" ] && [[ "$GPU_MODE" == "hybrid" || "$GPU_MODE" == "nvidia" ]]; then
+        case "$POWER_PROFILE" in
+            "power-saver")
+                set_nvidia_performance_mode "eco"
+                ;;
+            "balanced")
+                set_nvidia_performance_mode "balanced"
+                ;;
+            "performance")
+                set_nvidia_performance_mode "performance"
+                ;;
+        esac
+    elif [ -n "$GPU_MODE" ] && [ "$GPU_MODE" == "integrated" ]; then
+        # For integrated GPU mode, ensure NVIDIA is in lowest power state
+        set_nvidia_performance_mode "eco"
+    fi
+
     # Update current preset in config
     sed -i "s/DEFAULT_PRESET=.*/DEFAULT_PRESET=$preset/" "$CONFIG_FILE" 2>/dev/null
-    
+
     if [ $errors -eq 0 ]; then
         success "Preset '$preset' applied successfully!"
     else
         warning "Preset '$preset' applied with $errors errors"
     fi
-    
+
     return $errors
 }
 
 list_presets() {
     echo -e "${BLUE}📋 Available Power Presets:${NC}"
     echo "================================"
-    
+
     local current_preset="$DEFAULT_PRESET"
-    
+
     while IFS= read -r preset; do
         if [ -n "$preset" ]; then
             local preset_info=$(get_preset_info "$preset")
-            
+
             # Parse the preset info line by line instead of eval
             local TLP_MODE=$(echo "$preset_info" | grep "^TLP_MODE=" | cut -d'=' -f2)
             local GPU_MODE=$(echo "$preset_info" | grep "^GPU_MODE=" | cut -d'=' -f2)
             local POWER_PROFILE=$(echo "$preset_info" | grep "^POWER_PROFILE=" | cut -d'=' -f2)
             local DESCRIPTION=$(echo "$preset_info" | grep "^DESCRIPTION=" | cut -d'=' -f2-)
-            
+
             local marker=""
             if [ "$preset" = "$current_preset" ]; then
                 marker="${GREEN}[ACTIVE]${NC} "
             fi
-            
+
             echo -e "${marker}${CYAN}$preset${NC}"
             echo -e "  ${DESCRIPTION}"
             echo -e "  TLP: ${YELLOW}$TLP_MODE${NC} | GPU: ${YELLOW}$GPU_MODE${NC} | Profile: ${YELLOW}$POWER_PROFILE${NC}"
@@ -566,12 +635,12 @@ is_luks_open() {
 
 activate_hibernation_swap() {
     log "🔓 Activating encrypted swap for hibernation..."
-    
+
     if is_swap_active; then
         success "Swap is already active"
         return 0
     fi
-    
+
     if ! is_luks_open; then
         log "Unlocking encrypted swap partition..."
         if ! sudo cryptsetup luksOpen "$SWAP_DEVICE" "$SWAP_MAPPER"; then
@@ -581,7 +650,7 @@ activate_hibernation_swap() {
     else
         log "LUKS device already unlocked"
     fi
-    
+
     if ! sudo file -sL "$SWAP_PATH" | grep -q swap; then
         log "Creating swap filesystem..."
         if ! sudo mkswap "$SWAP_PATH"; then
@@ -589,34 +658,34 @@ activate_hibernation_swap() {
             return 1
         fi
     fi
-    
+
     log "Activating swap..."
     if ! sudo swapon "$SWAP_PATH"; then
         error "Failed to activate swap"
         return 1
     fi
-    
+
     # Set hibernation resume parameters
     echo "252:1" | sudo tee /sys/power/resume > /dev/null
     echo "0" | sudo tee /sys/power/resume_offset > /dev/null
-    
+
     success "Encrypted swap activated for hibernation"
     return 0
 }
 
 deactivate_hibernation_swap() {
     log "🔒 Deactivating encrypted swap..."
-    
+
     if is_swap_active; then
         log "Turning off swap..."
         sudo swapoff "$SWAP_PATH" 2>/dev/null || true
     fi
-    
+
     if is_luks_open; then
         log "Closing encrypted swap partition..."
         sudo cryptsetup luksClose "$SWAP_MAPPER" 2>/dev/null || true
     fi
-    
+
     success "Encrypted swap deactivated (energy saving mode)"
 }
 
@@ -625,20 +694,20 @@ hibernation_status() {
     echo "  Enabled: $HIBERNATION_ENABLED"
     echo "  Swap device: $SWAP_DEVICE"
     echo "  LUKS mapper: $SWAP_MAPPER"
-    
+
     if is_luks_open; then
         echo "  LUKS status: 🔓 OPEN"
     else
         echo "  LUKS status: 🔒 CLOSED"
     fi
-    
+
     if is_swap_active; then
         echo "  Swap status: ✅ ACTIVE"
         echo "  Swap size: $(swapon --show --noheadings | awk '{print $3}' 2>/dev/null || echo 'N/A')"
     else
         echo "  Swap status: 💤 INACTIVE (energy saving)"
     fi
-    
+
     echo "  Resume device: $(cat /sys/power/resume 2>/dev/null || echo 'not set')"
 }
 
@@ -647,9 +716,9 @@ hibernate_system() {
         error "Hibernation is disabled in config"
         return 1
     fi
-    
+
     log "🌙 Preparing system for hibernation..."
-    
+
     # Activate hibernation swap if needed
     if ! is_swap_active; then
         if ! activate_hibernation_swap; then
@@ -657,11 +726,11 @@ hibernate_system() {
             return 1
         fi
     fi
-    
+
     # Sync and prepare system
     log "Syncing filesystems..."
     sync
-    
+
     log "Hibernating system..."
     if sudo systemctl hibernate; then
         success "System hibernated successfully"
@@ -677,7 +746,7 @@ hibernate_system() {
 
 get_battery_info() {
     local battery_path="/sys/class/power_supply/BAT0"
-    
+
     if [ -d "$battery_path" ]; then
         local capacity=$(cat "$battery_path/capacity" 2>/dev/null || echo "N/A")
         local status=$(cat "$battery_path/status" 2>/dev/null || echo "Unknown")
@@ -693,11 +762,11 @@ get_battery_info() {
 show_comprehensive_status() {
     local desktop=$(detect_desktop)
     local current_preset="$DEFAULT_PRESET"
-    
+
     echo -e "${PURPLE}╔═══════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${PURPLE}║${NC}               ${CYAN}🚀 ENHANCED POWER CONTROL v${VERSION}${NC}                     ${PURPLE}║${NC}"
     echo -e "${PURPLE}╠═══════════════════════════════════════════════════════════════════════════╣${NC}"
-    
+
     # Current Preset Info
     echo -e "${PURPLE}║${NC} ${YELLOW}Active Preset: ${MAGENTA}${current_preset}${NC}                                           ${PURPLE}║${NC}"
     if grep -q "^$(echo "$current_preset" | tr '[:lower:]' '[:upper:]' | tr '-' '_')_DESCRIPTION=" "$PRESETS_FILE" 2>/dev/null; then
@@ -706,13 +775,13 @@ show_comprehensive_status() {
         echo -e "${PURPLE}║${NC}   Description: $DESCRIPTION                                              ${PURPLE}║${NC}"
     fi
     echo -e "${PURPLE}╠═══════════════════════════════════════════════════════════════════════════╣${NC}"
-    
+
     # System Info
     echo -e "${PURPLE}║${NC} ${YELLOW}System Status:${NC}                                                       ${PURPLE}║${NC}"
     echo -e "${PURPLE}║${NC}   Desktop Environment: $desktop                                          ${PURPLE}║${NC}"
     echo -e "${PURPLE}║${NC}   $(get_battery_info)                                                 ${PURPLE}║${NC}"
     echo -e "${PURPLE}║${NC}   Power Profile: $(get_power_profile)                                        ${PURPLE}║${NC}"
-    
+
     # GPU Information
     echo -e "${PURPLE}╠═══════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${PURPLE}║${NC} ${YELLOW}GPU Status:${NC}                                                          ${PURPLE}║${NC}"
@@ -720,18 +789,24 @@ show_comprehensive_status() {
         local gpu_mode=$(get_current_gpu_mode)
         echo -e "${PURPLE}║${NC}   Current GPU Mode: ${CYAN}${gpu_mode}${NC}                                      ${PURPLE}║${NC}"
         echo -e "${PURPLE}║${NC}   GPU Switching: $([ "$GPU_SWITCHING_ENABLED" = "true" ] && echo "✅ Enabled" || echo "❌ Disabled")                              ${PURPLE}║${NC}"
+
+        # Show NVIDIA status if GPU is in hybrid or nvidia mode
+        if [[ "$gpu_mode" == "hybrid" || "$gpu_mode" == "nvidia" ]]; then
+            local nvidia_status=$(get_nvidia_status)
+            echo -e "${PURPLE}║${NC}   NVIDIA Status: ${CYAN}${nvidia_status}${NC}                          ${PURPLE}║${NC}"
+        fi
     else
         echo -e "${PURPLE}║${NC}   envycontrol: ❌ Not available                                        ${PURPLE}║${NC}"
     fi
-    
-    # CPU Information  
+
+    # CPU Information
     echo -e "${PURPLE}╠═══════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${PURPLE}║${NC} ${YELLOW}CPU Status:${NC}                                                          ${PURPLE}║${NC}"
     if [ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]; then
         local turbo_status=$([ "$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)" = "0" ] && echo "Enabled" || echo "Disabled")
         echo -e "${PURPLE}║${NC}   Turbo Boost: $turbo_status                                           ${PURPLE}║${NC}"
     fi
-    
+
     # Temperature
     if has_sensors; then
         local temp=$(sensors 2>/dev/null | grep "Package id 0" | awk '{print $4}' 2>/dev/null)
@@ -739,7 +814,7 @@ show_comprehensive_status() {
             echo -e "${PURPLE}║${NC}   CPU Temperature: $temp                                         ${PURPLE}║${NC}"
         fi
     fi
-    
+
     # TLP Status
     echo -e "${PURPLE}╠═══════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${PURPLE}║${NC} ${YELLOW}TLP Integration:${NC}                                                     ${PURPLE}║${NC}"
@@ -749,14 +824,14 @@ show_comprehensive_status() {
         local tlp_status=$(systemctl is-active tlp 2>/dev/null || echo "inactive")
         echo -e "${PURPLE}║${NC}   TLP Service: $tlp_status                                           ${PURPLE}║${NC}"
     fi
-    
+
     if [ "$HIBERNATION_ENABLED" = "true" ]; then
         echo -e "${PURPLE}╠═══════════════════════════════════════════════════════════════════════════╣${NC}"
         echo -e "${PURPLE}║${NC} ${YELLOW}Hibernation Status:${NC}                                               ${PURPLE}║${NC}"
         echo -e "${PURPLE}║${NC}   LUKS Status: $(is_luks_open && echo "🔓 OPEN" || echo "🔒 CLOSED")                              ${PURPLE}║${NC}"
         echo -e "${PURPLE}║${NC}   Swap Status: $(is_swap_active && echo "✅ ACTIVE" || echo "💤 INACTIVE")                        ${PURPLE}║${NC}"
     fi
-    
+
     echo -e "${PURPLE}╚═══════════════════════════════════════════════════════════════════════════╝${NC}"
 }
 
@@ -777,7 +852,7 @@ configure_system() {
     echo "  GPU switching enabled: $GPU_SWITCHING_ENABLED"
     echo "  Default preset: $DEFAULT_PRESET"
     echo ""
-    
+
     read -p "Enable auto-eco on startup? (y/n): " startup
     read -p "Enable auto-eco on wake from sleep? (y/n): " wake
     read -p "Prefer GNOME native settings over powerprofilesctl? (y/n): " gnome_native
@@ -785,13 +860,13 @@ configure_system() {
     read -p "Enable TLP integration? (y/n): " tlp_integration
     read -p "Use TLP only on GNOME (recommended)? (y/n): " tlp_gnome_only
     read -p "Enable GPU switching with envycontrol? (y/n): " gpu_switching
-    
+
     echo ""
     echo "Available presets:"
     get_available_presets
     echo ""
     read -p "Enter default preset name: " default_preset
-    
+
     AUTO_ECO_ON_STARTUP=$([ "$startup" = "y" ] && echo "true" || echo "false")
     AUTO_ECO_ON_WAKE=$([ "$wake" = "y" ] && echo "true" || echo "false")
     PREFER_GNOME_NATIVE=$([ "$gnome_native" = "y" ] && echo "true" || echo "false")
@@ -800,7 +875,7 @@ configure_system() {
     TLP_ONLY_ON_GNOME=$([ "$tlp_gnome_only" = "y" ] && echo "true" || echo "false")
     GPU_SWITCHING_ENABLED=$([ "$gpu_switching" = "y" ] && echo "true" || echo "false")
     DEFAULT_PRESET="$default_preset"
-    
+
     cat > "$CONFIG_FILE" << CONF_EOF
 # Unified Power Control Configuration
 AUTO_ECO_ON_STARTUP=$AUTO_ECO_ON_STARTUP
@@ -812,7 +887,7 @@ TLP_ONLY_ON_GNOME=$TLP_ONLY_ON_GNOME
 GPU_SWITCHING_ENABLED=$GPU_SWITCHING_ENABLED
 DEFAULT_PRESET=$DEFAULT_PRESET
 CONF_EOF
-    
+
     success "Configuration saved!"
 }
 
@@ -823,7 +898,7 @@ CONF_EOF
 apply_startup_mode() {
     # Start TLP service if needed
     tlp_start
-    
+
     if [ "$AUTO_ECO_ON_STARTUP" = "true" ]; then
         echo "🌱 Auto-applying eco-mode on startup..."
         # Wait for session to stabilize for PolicyKit authorization
@@ -844,7 +919,7 @@ apply_wake_mode() {
     if should_use_tlp; then
         tlp_start
     fi
-    
+
     if [ "$AUTO_ECO_ON_WAKE" = "true" ]; then
         echo "🌱 Auto-applying eco-mode on wake..."
         apply_preset "ultra-eco"
@@ -856,19 +931,19 @@ apply_wake_mode() {
             tlp_apply_settings
         fi
     fi
-    
+
     # Post-hibernation cleanup (your existing code)
     if [ "$HIBERNATION_ENABLED" = "true" ]; then
         log "Restarting services after hibernation..."
-        
+
         # Restart system services
         sudo systemctl start NetworkManager.service 2>/dev/null || true
         sudo systemctl start bluetooth.service 2>/dev/null || true
-        
+
         # Restart user services
         systemctl --user start pipewire.service pipewire.socket 2>/dev/null || true
         systemctl --user start pulseaudio.service 2>/dev/null || true
-        
+
         sleep 5
         deactivate_hibernation_swap
     fi
@@ -886,7 +961,7 @@ show_help() {
     echo "  ultra-eco         - Maximum battery saving (integrated GPU + eco mode)"
     echo "  eco-gaming        - Light gaming with battery (hybrid GPU + balanced)"
     echo "  balanced          - Default balanced mode (hybrid GPU + balanced TLP)"
-    echo "  balanced-dgpu     - Balanced with dGPU capabilities (hybrid + balanced)"
+    echo "  balanced-dgpu     - Balanced with dGPU capabilities (nvidia + balanced)"
     echo "  performance       - High performance mode (hybrid GPU + AC TLP)"
     echo "  performance-dgpu  - Performance with dGPU (nvidia GPU + AC TLP)"
     echo "  gaming-max        - Maximum gaming power (nvidia GPU + performance)"
@@ -895,7 +970,7 @@ show_help() {
     echo ""
     echo -e "${YELLOW}Legacy Power Commands (PRESERVED):${NC}"
     echo "  eco               - Switch to eco/power-saver mode (+ TLP battery mode)"
-    echo "  performance       - Switch to performance mode (+ TLP AC mode)" 
+    echo "  performance       - Switch to performance mode (+ TLP AC mode)"
     echo "  balanced          - Switch to balanced mode (+ TLP auto mode)"
     echo ""
     echo -e "${YELLOW}Preset Management:${NC}"
@@ -904,7 +979,7 @@ show_help() {
     echo ""
     echo -e "${YELLOW}GPU Commands:${NC}"
     echo "  gpu-integrated    - Switch to integrated GPU only"
-    echo "  gpu-hybrid        - Switch to hybrid GPU mode"  
+    echo "  gpu-hybrid        - Switch to hybrid GPU mode"
     echo "  gpu-nvidia        - Switch to discrete/nvidia GPU"
     echo "  gpu-status        - Show current GPU mode"
     echo ""
@@ -916,7 +991,7 @@ show_help() {
     echo ""
     echo -e "${YELLOW}TLP Commands:${NC}"
     echo "  tlp-start         - Start TLP service"
-    echo "  tlp-stop          - Stop TLP service" 
+    echo "  tlp-stop          - Stop TLP service"
     echo "  tlp-ac            - Force TLP AC mode"
     echo "  tlp-bat           - Force TLP battery mode"
     echo "  tlp-status        - Show TLP status"
@@ -983,7 +1058,7 @@ case "$1" in
             get_available_presets
         fi
         ;;
-    
+
     # Legacy power profile commands (PRESERVED - no changes to maintain compatibility)
     "eco"|"power-saver")
         set_power_profile "power-saver"
@@ -994,12 +1069,12 @@ case "$1" in
     "balanced")
         set_power_profile "balanced"
         ;;
-    
+
     # Preset management commands
     "list-presets")
         list_presets
         ;;
-    
+
     # GPU-specific commands
     "gpu-integrated")
         set_gpu_mode "integrated"
@@ -1013,7 +1088,7 @@ case "$1" in
     "gpu-status")
         echo "Current GPU mode: $(get_current_gpu_mode)"
         ;;
-    
+
     # System commands (PRESERVED)
     "status")
         show_comprehensive_status
@@ -1031,7 +1106,7 @@ case "$1" in
         sed -i 's/AUTO_ECO_ON_WAKE=.*/AUTO_ECO_ON_WAKE=false/' "$CONFIG_FILE"
         warning "Auto-eco mode disabled"
         ;;
-    
+
     # TLP commands (PRESERVED)
     "tlp-start")
         tlp_start
@@ -1052,7 +1127,7 @@ case "$1" in
             error "TLP not available"
         fi
         ;;
-    
+
     # Hibernation commands (PRESERVED - keeping all your existing ones)
     "hibernate")
         # Stop TLP before hibernation to prevent conflicts
@@ -1068,7 +1143,7 @@ case "$1" in
     "swap-off")
         deactivate_hibernation_swap
         ;;
-    
+
     # System integration (PRESERVED)
     "startup")
         apply_startup_mode
@@ -1079,7 +1154,7 @@ case "$1" in
     "desktop")
         echo "Detected desktop environment: $(detect_desktop)"
         ;;
-    
+
     # Disk Management commands (NEW)
     "disk-status")
         if has_disk_manager; then
@@ -1144,7 +1219,7 @@ case "$1" in
             error "Disk manager not available"
         fi
         ;;
-    
+
     # Help and default
     *)
         show_help
