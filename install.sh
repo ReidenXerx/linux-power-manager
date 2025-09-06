@@ -184,9 +184,11 @@ install_scripts() {
     sudo cp "$SCRIPT_DIR/scripts/power-control.sh" "$INSTALL_PREFIX/"
     sudo cp "$SCRIPT_DIR/scripts/power-status.sh" "$INSTALL_PREFIX/"
     sudo cp "$SCRIPT_DIR/scripts/disk-manager.sh" "$INSTALL_PREFIX/"
+    sudo cp "$SCRIPT_DIR/scripts/wifi-intel-optimizer.sh" "$INSTALL_PREFIX/"
     sudo chmod +x "$INSTALL_PREFIX/power-control.sh"
     sudo chmod +x "$INSTALL_PREFIX/power-status.sh"
     sudo chmod +x "$INSTALL_PREFIX/disk-manager.sh"
+    sudo chmod +x "$INSTALL_PREFIX/wifi-intel-optimizer.sh"
     
     success "Scripts installed to $INSTALL_PREFIX"
 }
@@ -331,6 +333,11 @@ alias disk-temp='disk-manager.sh temp'
 alias disk-smart='disk-manager.sh smart'
 alias disk-scan='disk-manager.sh scan'
 alias disk-clean='disk-manager.sh clean'
+
+# WiFi Power Optimization aliases
+alias wifi-optimize='wifi-intel-optimizer.sh optimize'
+alias wifi-status='wifi-intel-optimizer.sh status'
+alias wifi-test='wifi-intel-optimizer.sh test'
 EOF
         success "Bash aliases installed"
         info "Run 'source ~/.bashrc' or restart your terminal to use aliases"
@@ -352,6 +359,8 @@ show_usage() {
     echo "  disk-manager.sh status        - Show disk status and health"
     echo "  disk-manager.sh health        - Comprehensive disk health check"
     echo "  disk-manager.sh temp          - Monitor disk temperatures"
+    echo "  wifi-intel-optimizer.sh optimize - Optimize Intel WiFi power settings"
+    echo "  wifi-intel-optimizer.sh status   - Show WiFi power status"
     echo ""
     echo -e "${YELLOW}Aliases (after restart/source):${NC}"
     echo "  power-status      - Show power status"
@@ -363,6 +372,8 @@ show_usage() {
     echo "  disk-status       - Show disk status"
     echo "  disk-health       - Check disk health"
     echo "  disk-temp         - Monitor disk temperatures"
+    echo "  wifi-optimize     - Optimize WiFi power settings"
+    echo "  wifi-status       - Show WiFi power status"
     echo ""
     echo -e "${YELLOW}Configuration:${NC}"
     echo "  power-control.sh config - Configure settings"
