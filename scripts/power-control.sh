@@ -157,6 +157,63 @@ has_supergfxctl() { command -v supergfxctl > /dev/null 2>&1; }
 has_cctk() { [ -x "/opt/dell/dcc/cctk" ]; }
 has_disk_manager() { [ -x "$(dirname "$0")/disk-manager.sh" ] || [ -x "/usr/local/bin/disk-manager.sh" ]; }
 
+# ============================================================================
+# WIFI POWER OPTIMIZATION FUNCTIONS
+# ============================================================================
+
+# Apply WiFi power optimizations based on preset
+apply_wifi_optimizations() {
+    local mode="$1"
+    local wifi_interface=""
+    
+    # Get WiFi interface
+    wifi_interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
+    if [ -z "$wifi_interface" ]; then
+        return 0  # No WiFi interface, skip
+    fi
+    
+    # Check if Intel WiFi
+    if ! lspci | grep -i "intel.*network\|intel.*wifi" > /dev/null; then
+        return 0  # Not Intel WiFi, skip specific optimizations
+    fi
+    
+    info "Optimizing WiFi power management ($mode mode)"
+    
+    case "$mode" in
+        "aggressive")
+            # Ultra-eco mode: Maximum power saving
+            if command -v iw >/dev/null 2>&1; then
+                sudo iw dev "$wifi_interface" set power_save on 2>/dev/null || true
+            fi
+            # Set power level to 4 (aggressive power saving)
+            echo 4 2>/dev/null | sudo tee /sys/module/iwlwifi/parameters/power_level >/dev/null || true
+            ;;
+        "balanced")
+            # Balanced mode: Good balance of power saving and performance
+            if command -v iw >/dev/null 2>&1; then
+                sudo iw dev "$wifi_interface" set power_save on 2>/dev/null || true
+            fi
+            # Set power level to 3 (balanced power saving)
+            echo 3 2>/dev/null | sudo tee /sys/module/iwlwifi/parameters/power_level >/dev/null || true
+            ;;
+        "performance")
+            # Performance mode: Minimal power saving for best performance
+            if command -v iw >/dev/null 2>&1; then
+                sudo iw dev "$wifi_interface" set power_save off 2>/dev/null || true
+            fi
+            # Set power level to 1 (minimal power saving)
+            echo 1 2>/dev/null | sudo tee /sys/module/iwlwifi/parameters/power_level >/dev/null || true
+            ;;
+        *)
+            # Default: balanced approach
+            if command -v iw >/dev/null 2>&1; then
+                sudo iw dev "$wifi_interface" set power_save on 2>/dev/null || true
+            fi
+            echo 3 2>/dev/null | sudo tee /sys/module/iwlwifi/parameters/power_level >/dev/null || true
+            ;;
+    esac
+}
+
 # Check if NVIDIA GPU is accessible (not just if nvidia-smi exists)
 nvidia_gpu_accessible() {
     # First check if nvidia-smi command exists
@@ -1089,6 +1146,29 @@ apply_preset() {
         set_power_profile "$POWER_PROFILE" || ((errors++))
     fi
 
+# Apply WiFi power optimizations
+    if [ -x "$(dirname "$0")/wifi-intel-optimizer.sh" ] || [ -x "/usr/local/bin/wifi-intel-optimizer.sh" ]; then
+        info "Applying WiFi power optimizations for preset: $preset"
+        case "$preset" in
+            "ultra-eco")
+                # Most aggressive WiFi power saving
+                apply_wifi_optimizations "aggressive"
+                ;;
+            "balanced")
+                # Balanced WiFi power management
+                apply_wifi_optimizations "balanced"
+                ;;
+            "performance"*|"gaming"*)
+                # Less aggressive WiFi power saving for performance
+                apply_wifi_optimizations "performance"
+                ;;
+            *)
+                # Default balanced approach
+                apply_wifi_optimizations "balanced"
+                ;;
+        esac
+    fi
+    
     # Apply NVIDIA performance settings based on GPU mode and power profile
     if [ -n "$GPU_MODE" ] && [[ "$GPU_MODE" == "hybrid" || "$GPU_MODE" == "nvidia" ]]; then
         info "Applying NVIDIA optimizations for dGPU mode: $GPU_MODE"
