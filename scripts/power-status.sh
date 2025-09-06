@@ -425,9 +425,7 @@ apply_startup_mode() {
     if [ "$AUTO_ECO_ON_STARTUP" = "true" ]; then
         echo "🌱 Auto-applying eco-mode on startup..."
         set_power_profile "power-saver"
-        if [ -f "$SCRIPT_DIR/eco-mode.sh" ]; then
-            "$SCRIPT_DIR/eco-mode.sh"
-        fi
+        # Eco mode optimizations are now integrated into power-control.sh
     fi
 }
 
@@ -436,9 +434,7 @@ apply_wake_mode() {
     if [ "$AUTO_ECO_ON_WAKE" = "true" ]; then
         echo "🌱 Auto-applying eco-mode on wake..."
         set_power_profile "power-saver"
-        if [ -f "$SCRIPT_DIR/eco-mode.sh" ]; then
-            "$SCRIPT_DIR/eco-mode.sh"
-        fi
+        # Eco mode optimizations are now integrated into power-control.sh
     fi
 }
 
@@ -482,17 +478,11 @@ show_help() {
 case "$1" in
     "eco")
         set_power_profile "power-saver"
-        # Also run the original eco-mode script if it exists
-        if [ -f "$SCRIPT_DIR/eco-mode.sh" ]; then
-            "$SCRIPT_DIR/eco-mode.sh"
-        fi
+        # Eco mode optimizations are now integrated into power-control.sh
         ;;
     "performance")
         set_power_profile "performance"
-        # Also run the original performance-mode script if it exists
-        if [ -f "$SCRIPT_DIR/performance-mode.sh" ]; then
-            "$SCRIPT_DIR/performance-mode.sh"
-        fi
+        # Performance mode optimizations are now integrated into power-control.sh
         ;;
     "balanced")
         set_power_profile "balanced"

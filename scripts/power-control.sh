@@ -36,9 +36,9 @@ if [ ! -f "$CONFIG_FILE" ]; then
 AUTO_ECO_ON_STARTUP=true
 AUTO_ECO_ON_WAKE=true
 PREFER_GNOME_NATIVE=true
-HIBERNATION_ENABLED=true
+HIBERNATION_ENABLED=false
 TLP_INTEGRATION_ENABLED=true
-TLP_ONLY_ON_GNOME=true
+TLP_ONLY_ON_GNOME=false
 GPU_SWITCHING_ENABLED=true
 DEFAULT_PRESET=balanced
 CONF_EOF
@@ -153,7 +153,201 @@ has_acpi() { command -v acpi > /dev/null 2>&1; }
 has_sensors() { command -v sensors > /dev/null 2>&1; }
 has_tlp() { command -v tlp > /dev/null 2>&1; }
 has_envycontrol() { command -v envycontrol > /dev/null 2>&1; }
+has_supergfxctl() { command -v supergfxctl > /dev/null 2>&1; }
+has_cctk() { [ -x "/opt/dell/dcc/cctk" ]; }
 has_disk_manager() { [ -x "$(dirname "$0")/disk-manager.sh" ] || [ -x "/usr/local/bin/disk-manager.sh" ]; }
+
+# Check if NVIDIA GPU is accessible (not just if nvidia-smi exists)
+nvidia_gpu_accessible() {
+    # First check if nvidia-smi command exists
+    if ! command -v nvidia-smi > /dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Check current GPU mode with envycontrol if available
+    local gpu_mode="unknown"
+    if has_envycontrol; then
+        gpu_mode=$(envycontrol --query 2>/dev/null || echo "unknown")
+    fi
+    
+    # If we're in integrated mode, NVIDIA GPU won't be accessible
+    if [ "$gpu_mode" = "integrated" ]; then
+        return 1
+    fi
+    
+    # Check if we can actually communicate with the driver
+    # This prevents the "couldn't communicate with NVIDIA driver" error
+    if nvidia-smi -L > /dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ============================================================================
+# SYSTEM MONITORING AND RECOMMENDATIONS
+# ============================================================================
+
+# Get system health metrics
+get_system_health() {
+    local temp="N/A"
+    local load="N/A"
+    local battery="N/A"
+    local ac_connected="unknown"
+    
+    # CPU Temperature
+    if has_sensors; then
+        temp=$(sensors 2>/dev/null | grep "Package id 0" | awk '{print $4}' | sed 's/+//' || echo "N/A")
+    fi
+    
+    # System load
+    if [ -f /proc/loadavg ]; then
+        load=$(awk '{print $1}' /proc/loadavg)
+    fi
+    
+    # Battery status
+    if [ -f /sys/class/power_supply/BAT0/capacity ]; then
+        battery=$(cat /sys/class/power_supply/BAT0/capacity)
+        local status=$(cat /sys/class/power_supply/BAT0/status 2>/dev/null || echo "Unknown")
+        battery="${battery}% (${status})"
+    fi
+    
+    # AC adapter status
+    if [ -f /sys/class/power_supply/ADP1/online ]; then
+        local ac_status=$(cat /sys/class/power_supply/ADP1/online)
+        ac_connected=$([ "$ac_status" = "1" ] && echo "yes" || echo "no")
+    fi
+    
+    echo "TEMP=$temp"
+    echo "LOAD=$load"
+    echo "BATTERY=$battery"
+    echo "AC_CONNECTED=$ac_connected"
+}
+
+# Recommend optimal preset based on system state
+recommend_preset() {
+    local health_info=$(get_system_health)
+    local temp=$(echo "$health_info" | grep "^TEMP=" | cut -d'=' -f2 | sed 's/°C//')
+    local load=$(echo "$health_info" | grep "^LOAD=" | cut -d'=' -f2)
+    local battery=$(echo "$health_info" | grep "^BATTERY=" | cut -d'=' -f2 | cut -d'%' -f1)
+    local ac_connected=$(echo "$health_info" | grep "^AC_CONNECTED=" | cut -d'=' -f2)
+    
+    echo -e "${BLUE}🎯 Preset Recommendation System${NC}"
+    echo "==============================="
+    echo "System Status:"
+    echo "  CPU Temperature: ${temp}°C"
+    echo "  System Load: $load"
+    echo "  Battery: $battery%"
+    echo "  AC Connected: $ac_connected"
+    echo ""
+    
+    # Recommendation logic
+    local recommended="balanced"
+    local reason="Default balanced mode"
+    
+    # High temperature - recommend eco mode
+    if [ "$temp" != "N/A" ] && [ "${temp%.*}" -gt 70 ] 2>/dev/null; then
+        recommended="ultra-eco"
+        reason="High temperature detected (${temp}°C) - cooling system"
+    # Low battery - recommend eco mode
+    elif [ "$battery" != "N/A" ] && [ "$battery" -lt 20 ] 2>/dev/null; then
+        recommended="ultra-eco"
+        reason="Low battery (${battery}%) - maximum power saving"
+    # On battery with moderate charge - work mode
+    elif [ "$ac_connected" = "no" ] && [ "$battery" != "N/A" ] && [ "$battery" -gt 40 ] 2>/dev/null; then
+        recommended="work-mode"
+        reason="On battery power - optimized for productivity"
+    # High load on AC - performance mode
+    elif [ "$ac_connected" = "yes" ] && [ "$load" != "N/A" ] && [ "${load%.*}" -gt 2 ] 2>/dev/null; then
+        recommended="performance-dgpu"
+        reason="High system load (${load}) on AC - maximum performance"
+    # AC connected with good conditions - balanced
+    elif [ "$ac_connected" = "yes" ]; then
+        recommended="balanced"
+        reason="AC connected - balanced performance and efficiency"
+    fi
+    
+    echo -e "${GREEN}Recommended preset: ${CYAN}$recommended${NC}"
+    echo -e "Reason: $reason"
+    echo ""
+    
+    read -p "Apply recommended preset '$recommended'? (y/n): " apply_rec
+    if [ "$apply_rec" = "y" ]; then
+        apply_preset "$recommended"
+    fi
+}
+
+# ============================================================================
+# PERFORMANCE MODE FUNCTIONS (CONSOLIDATED)
+# ============================================================================
+
+# Apply eco mode optimizations
+apply_eco_mode() {
+    echo "🌱 Switching to ECO MODE (Maximum Power Savings)..."
+    
+    # Disable turbo boost for maximum energy savings
+    sudo bash -c 'echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo' 2>/dev/null
+    
+    # Get current power profile for display
+    local power_profile="TLP-managed"
+    if has_powerprofilesctl && powerprofilesctl list >/dev/null 2>&1; then
+        power_profile=$(powerprofilesctl get 2>/dev/null || echo "TLP-managed")
+    fi
+    
+    # Verify changes
+    echo "✅ Power Profile: $power_profile"
+    echo "✅ Turbo Boost Disabled: $(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo 'N/A')"
+    
+    # Show current CPU frequencies
+    echo "📊 Current CPU frequencies (first 4 cores):"
+    if command -v bc >/dev/null 2>&1; then
+        cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null | head -4 | while read freq; do
+            echo "   $(echo "scale=2; $freq/1000" | bc) MHz"
+        done
+    fi
+    
+    # Show temperature
+    if has_sensors; then
+        local temp=$(sensors 2>/dev/null | grep "Package id 0" | awk '{print $4}' || echo "N/A")
+        echo "🌡️  CPU Temperature: $temp"
+    fi
+    
+    echo "🎯 ECO MODE ACTIVATED - Optimized for battery life and low heat!"
+}
+
+# Apply performance mode optimizations
+apply_performance_mode() {
+    echo "🚀 Switching to PERFORMANCE MODE (Maximum Power)..."
+    
+    # Enable turbo boost for maximum performance
+    sudo bash -c 'echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo' 2>/dev/null
+    
+    # Get current power profile for display
+    local power_profile="TLP-managed"
+    if has_powerprofilesctl && powerprofilesctl list >/dev/null 2>&1; then
+        power_profile=$(powerprofilesctl get 2>/dev/null || echo "TLP-managed")
+    fi
+    
+    # Verify changes
+    echo "✅ Power Profile: $power_profile"
+    echo "✅ Turbo Boost Enabled: $(cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null || echo 'N/A')"
+    
+    # Show current CPU frequencies
+    echo "📊 Current CPU frequencies (first 4 cores):"
+    if command -v bc >/dev/null 2>&1; then
+        cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null | head -4 | while read freq; do
+            echo "   $(echo "scale=2; $freq/1000" | bc) MHz"
+        done
+    fi
+    
+    # Show temperature
+    if has_sensors; then
+        local temp=$(sensors 2>/dev/null | grep "Package id 0" | awk '{print $4}' || echo "N/A")
+        echo "🌡️  CPU Temperature: $temp"
+    fi
+    
+    echo "⚡ PERFORMANCE MODE ACTIVATED - Full power unleashed!"
+}
 
 # ============================================================================
 # GPU MANAGEMENT FUNCTIONS
@@ -163,8 +357,10 @@ has_disk_manager() { [ -x "$(dirname "$0")/disk-manager.sh" ] || [ -x "/usr/loca
 set_nvidia_performance_mode() {
     local mode="$1"  # eco, balanced, performance
 
-    if ! command -v nvidia-smi > /dev/null 2>&1; then
-        return 0  # Skip if NVIDIA not available
+    # Use the new accessibility check instead of just command existence
+    if ! nvidia_gpu_accessible; then
+        info "NVIDIA GPU not accessible (integrated mode or driver not loaded) - skipping NVIDIA performance settings"
+        return 0  # Skip gracefully if NVIDIA not accessible
     fi
 
     case "$mode" in
@@ -196,10 +392,71 @@ set_nvidia_performance_mode() {
     esac
 }
 
+# Enhanced gaming mode with maximum optimizations
+apply_enhanced_gaming_mode() {
+    if ! nvidia_gpu_accessible; then
+        info "NVIDIA GPU not accessible - skipping enhanced gaming optimizations"
+        return 0
+    fi
+    
+    log "🎮 Applying enhanced gaming optimizations..."
+    
+    # Set CPU to performance mode for gaming
+    echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+    
+    # Disable CPU turbo boost variability for consistent performance
+    echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo >/dev/null 2>&1 || true
+    
+    # Additional NVIDIA gaming optimizations beyond the kernel parameters
+    if command -v nvidia-settings >/dev/null 2>&1; then
+        # Set maximum performance mode
+        nvidia-settings -a "[gpu:0]/GPUPowerMizerMode=1" >/dev/null 2>&1 || true
+        # Apply memory overclock (safe +1000MHz)
+        nvidia-settings -a "[gpu:0]/GPUMemoryTransferRateOffset[3]=1000" >/dev/null 2>&1 || true
+        # Apply conservative GPU overclock (+100MHz)
+        nvidia-settings -a "[gpu:0]/GPUGraphicsClockOffset[3]=100" >/dev/null 2>&1 || true
+        # Set fan curve to prioritize cooling over silence
+        nvidia-settings -a "[gpu:0]/GPUFanControlState=1" >/dev/null 2>&1 || true
+        nvidia-settings -a "[fan:0]/GPUTargetFanSpeed=85" >/dev/null 2>&1 || true
+        success "Applied nvidia-settings optimizations"
+    fi
+    
+    # Additional nvidia-smi optimizations
+    # Disable auto-boost for consistent clocks
+    sudo nvidia-smi --auto-boost-default=0 >/dev/null 2>&1 || true
+    # Enable auto-boost permissions for manual control
+    sudo nvidia-smi --auto-boost-permission=1 >/dev/null 2>&1 || true
+    
+    # Set I/O scheduler to performance for gaming storage
+    for disk in /sys/block/nvme*; do
+        if [ -f "$disk/queue/scheduler" ]; then
+            echo "mq-deadline" | sudo tee "$disk/queue/scheduler" >/dev/null 2>&1 || true
+        fi
+    done
+    
+    success "🚀 Enhanced gaming mode activated - maximum performance!"
+}
+
 # Get NVIDIA GPU status for display
 get_nvidia_status() {
     if ! command -v nvidia-smi > /dev/null 2>&1; then
         echo "Not available"
+        return 0
+    fi
+
+    # Check if NVIDIA GPU is accessible first
+    if ! nvidia_gpu_accessible; then
+        # Check current GPU mode to provide helpful status
+        local gpu_mode="unknown"
+        if has_envycontrol; then
+            gpu_mode=$(envycontrol --query 2>/dev/null || echo "unknown")
+        fi
+        
+        if [ "$gpu_mode" = "integrated" ]; then
+            echo "Disabled (integrated mode)"
+        else
+            echo "Driver not loaded"
+        fi
         return 0
     fi
 
@@ -210,25 +467,152 @@ get_nvidia_status() {
     echo "${power_draw}W, GPU:${gpu_clock}MHz, Mem:${mem_clock}MHz"
 }
 
-get_current_gpu_mode() {
-    if has_envycontrol; then
-        envycontrol --query 2>/dev/null || echo "unknown"
+# Hardware MUX switch control (Dell CCTK)
+get_hardware_mux_status() {
+    if has_cctk; then
+        local status=$(sudo /opt/dell/dcc/cctk --HybridGraphics 2>/dev/null | cut -d'=' -f2)
+        echo "$status"
     else
         echo "unavailable"
+    fi
+}
+
+set_hardware_mux_mode() {
+    local mode="$1"  # "hybrid" or "discrete"
+    
+    if ! has_cctk; then
+        warning "Dell CCTK not available - cannot control hardware MUX switch"
+        return 1
+    fi
+    
+    local current_status=$(get_hardware_mux_status)
+    local target_setting=""
+    
+    case "$mode" in
+        "hybrid"|"integrated")
+            target_setting="Enabled"
+            ;;
+        "discrete"|"nvidia"|"dgpu")
+            target_setting="Disabled"
+            ;;
+        *)
+            error "Invalid hardware MUX mode: $mode (use: hybrid, discrete)"
+            return 1
+            ;;
+    esac
+    
+    if [ "$current_status" = "$target_setting" ]; then
+        info "Hardware MUX already in $mode mode ($current_status)"
+        return 0
+    fi
+    
+    log "Setting hardware MUX switch to $mode mode (BIOS: $target_setting)..."
+    
+    if sudo /opt/dell/dcc/cctk --HybridGraphics="$target_setting" >/dev/null 2>&1; then
+        success "Hardware MUX switch set to $mode mode"
+        warning "⚠️  BIOS setting changed - reboot required for hardware MUX change to take effect"
+        return 0
+    else
+        error "Failed to set hardware MUX switch to $mode mode"
+        return 1
+    fi
+}
+
+get_current_gpu_mode() {
+    # Check hardware MUX status first for Alienware systems
+    if has_cctk; then
+        local hw_mux_status=$(get_hardware_mux_status)
+        local sw_gpu_mode="unknown"
+        
+        # Get software GPU mode
+        if has_supergfxctl; then
+            sw_gpu_mode=$(supergfxctl -g 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo "unknown")
+            # Convert SupergfxCtl terms to standard terms
+            case "$sw_gpu_mode" in
+                "integrated") sw_gpu_mode="integrated" ;;
+                "hybrid") sw_gpu_mode="hybrid" ;;
+                "dedicated") sw_gpu_mode="nvidia" ;;
+            esac
+        elif has_envycontrol; then
+            sw_gpu_mode=$(envycontrol --query 2>/dev/null || echo "unknown")
+        fi
+        
+        # Combine hardware and software status for comprehensive mode
+        if [ "$hw_mux_status" = "Disabled" ]; then
+            echo "discrete-mux"  # True MUX switch mode
+        elif [ "$hw_mux_status" = "Enabled" ] && [ "$sw_gpu_mode" = "nvidia" ]; then
+            echo "hybrid-nvidia"  # Hybrid mode with NVIDIA active
+        elif [ "$hw_mux_status" = "Enabled" ] && [ "$sw_gpu_mode" = "hybrid" ]; then
+            echo "hybrid"  # True hybrid mode
+        elif [ "$hw_mux_status" = "Enabled" ] && [ "$sw_gpu_mode" = "integrated" ]; then
+            echo "integrated"  # Integrated only
+        else
+            echo "$sw_gpu_mode"  # Fallback to software mode
+        fi
+    else
+        # Fallback to software-only detection
+        if has_supergfxctl; then
+            local mode=$(supergfxctl -g 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo "unknown")
+            # Convert SupergfxCtl terms to standard terms
+            case "$mode" in
+                "integrated") echo "integrated" ;;
+                "hybrid") echo "hybrid" ;;
+                "dedicated") echo "nvidia" ;;
+                *) echo "unknown" ;;
+            esac
+        elif has_envycontrol; then
+            envycontrol --query 2>/dev/null || echo "unknown"
+        else
+            echo "unavailable"
+        fi
     fi
 }
 
 set_gpu_mode() {
     local mode="$1"
     local reboot_required=false
+    local hardware_mux_change=false
 
     if [ "$GPU_SWITCHING_ENABLED" != "true" ]; then
         info "GPU switching disabled in config - skipping GPU mode change"
         return 0
     fi
 
-    if ! has_envycontrol; then
-        warning "envycontrol not available - skipping GPU mode change"
+    # Check current session type for NVIDIA compatibility warning
+    local current_session="$XDG_SESSION_TYPE"
+    if [ "$mode" = "nvidia" ] && [ "$current_session" = "wayland" ]; then
+        warning "⚠️  Switching to NVIDIA dGPU mode from Wayland session"
+        info "   After reboot, the system will use X11 for proper NVIDIA support"
+        info "   This is normal and required for MUX switch functionality"
+    fi
+    
+    # Handle hardware MUX switch for true discrete mode
+    if [ "$mode" = "discrete-mux" ] || [ "$mode" = "mux-discrete" ]; then
+        info "Enabling true hardware MUX switch mode..."
+        if set_hardware_mux_mode "discrete"; then
+            hardware_mux_change=true
+            reboot_required=true
+        else
+            error "Failed to enable hardware MUX switch - falling back to software discrete mode"
+            mode="nvidia"  # Fallback to software-only discrete mode
+        fi
+    elif [ "$mode" = "nvidia" ] || [ "$mode" = "discrete" ]; then
+        # For regular discrete mode, check if we should also enable hardware MUX
+        local current_hw_mux=$(get_hardware_mux_status)
+        if [ "$current_hw_mux" = "Enabled" ]; then
+            info "Hardware MUX in hybrid mode - software discrete GPU switching will be used"
+            info "For true MUX switch, use 'discrete-mux' mode or 'power-control.sh mux-discrete'"
+        fi
+    fi
+
+    # Prefer SupergfxCtl, fallback to EnvyControl
+    local gpu_tool="none"
+    if has_supergfxctl; then
+        gpu_tool="supergfxctl"
+    elif has_envycontrol; then
+        gpu_tool="envycontrol"
+    else
+        warning "No GPU switching tool available (supergfxctl or envycontrol) - skipping GPU mode change"
         return 1
     fi
 
@@ -242,30 +626,80 @@ set_gpu_mode() {
 
     case "$mode" in
         "integrated"|"intel")
-            if sudo envycontrol -s integrated --force-comp --coolbits 24 > /dev/null 2>&1; then
-                success "GPU switched to integrated mode"
-                reboot_required=true
+            local switch_output
+            if [ "$gpu_tool" = "supergfxctl" ]; then
+                switch_output=$(sudo supergfxctl -m Integrated 2>&1)
+                if [ $? -eq 0 ]; then
+                    success "GPU switched to integrated mode via SupergfxCtl"
+                    reboot_required=true
+                else
+                    error "Failed to switch GPU to integrated mode: $switch_output"
+                    return 1
+                fi
             else
-                error "Failed to switch GPU to integrated mode"
-                return 1
+                switch_output=$(sudo envycontrol -s integrated --force-comp --coolbits 24 2>&1)
+                if [ $? -eq 0 ]; then
+                    success "GPU switched to integrated mode via EnvyControl"
+                    reboot_required=true
+                else
+                    # Check if it's a "Could not find Nvidia GPU" error - this can happen in hybrid mode
+                    if echo "$switch_output" | grep -q "Could not find Nvidia GPU"; then
+                        warning "NVIDIA GPU not currently active - GPU mode change may not be necessary"
+                        info "Current GPU mode is already power-efficient"
+                        return 0  # Don't treat as error
+                    else
+                        error "Failed to switch GPU to integrated mode: $switch_output"
+                        return 1
+                    fi
+                fi
             fi
             ;;
         "hybrid")
-            if sudo envycontrol -s hybrid --force-comp --coolbits 24 --rtd3 > /dev/null 2>&1; then
-                success "GPU switched to hybrid mode"
-                reboot_required=true
+            if [ "$gpu_tool" = "supergfxctl" ]; then
+                if sudo supergfxctl -m Hybrid > /dev/null 2>&1; then
+                    success "GPU switched to hybrid mode via SupergfxCtl"
+                    reboot_required=true
+                else
+                    error "Failed to switch GPU to hybrid mode"
+                    return 1
+                fi
             else
-                error "Failed to switch GPU to hybrid mode"
-                return 1
+                if sudo envycontrol -s hybrid --force-comp --coolbits 24 --rtd3 > /dev/null 2>&1; then
+                    success "GPU switched to hybrid mode via EnvyControl"
+                    reboot_required=true
+                else
+                    error "Failed to switch GPU to hybrid mode"
+                    return 1
+                fi
             fi
             ;;
         "nvidia"|"discrete")
-            if sudo envycontrol -s nvidia --force-comp --coolbits 24 > /dev/null 2>&1; then
-                success "GPU switched to discrete/nvidia mode"
-                reboot_required=true
+            local switch_output
+            if [ "$gpu_tool" = "supergfxctl" ]; then
+                switch_output=$(sudo supergfxctl -m Dedicated 2>&1)
+                if [ $? -eq 0 ]; then
+                    success "GPU switched to discrete/nvidia mode via SupergfxCtl"
+                    reboot_required=true
+                else
+                    error "Failed to switch GPU to nvidia mode: $switch_output"
+                    return 1
+                fi
             else
-                error "Failed to switch GPU to nvidia mode"
-                return 1
+                switch_output=$(sudo envycontrol -s nvidia --force-comp --coolbits 24 2>&1)
+                if [ $? -eq 0 ]; then
+                    success "GPU switched to discrete/nvidia mode via EnvyControl"
+                    reboot_required=true
+                else
+                    # Check for specific error conditions
+                    if echo "$switch_output" | grep -q "Could not find Nvidia GPU"; then
+                        warning "NVIDIA GPU not currently accessible - may need reboot or driver reload"
+                        info "Try switching to hybrid mode first, then reboot"
+                        return 1
+                    else
+                        error "Failed to switch GPU to nvidia mode: $switch_output"
+                        return 1
+                    fi
+                fi
             fi
             ;;
         *)
@@ -347,6 +781,7 @@ tlp_apply_settings() {
     return 0
 }
 
+# Enhanced TLP integration with preset-specific optimizations
 tlp_set_mode() {
     local mode="$1"
 
@@ -382,14 +817,61 @@ tlp_set_mode() {
     esac
 }
 
+# Apply preset-specific TLP configuration
+tlp_apply_preset_config() {
+    local preset="$1"
+    
+    if ! should_use_tlp; then
+        return 0
+    fi
+    
+    log "Applying TLP configuration for preset: $preset"
+    
+    # Path to preset-specific TLP configuration
+    local preset_config="/usr/local/share/power-manager/tlp-presets/${preset}.conf"
+    local backup_config="/etc/tlp.conf.power-manager-backup"
+    
+    # Check if preset config exists
+    if [ ! -f "$preset_config" ]; then
+        warning "No specific TLP config for preset '$preset', using default TLP mode"
+        tlp_set_mode "$2"  # fallback to basic mode
+        return 1
+    fi
+    
+    # Backup original TLP config if not already backed up
+    if [ -f "/etc/tlp.conf" ] && [ ! -f "$backup_config" ]; then
+        log "Creating backup of original TLP configuration..."
+        sudo cp "/etc/tlp.conf" "$backup_config"
+    fi
+    
+    # Apply preset-specific configuration
+    log "Installing TLP configuration for $preset..."
+    if sudo cp "$preset_config" "/etc/tlp.conf"; then
+        success "TLP configuration for '$preset' installed"
+    else
+        error "Failed to install TLP configuration for '$preset'"
+        return 1
+    fi
+    
+    # Apply the new configuration
+    if sudo tlp start >/dev/null 2>&1; then
+        success "TLP configuration for '$preset' applied"
+    else
+        warning "Failed to apply TLP configuration - using fallback"
+        tlp_set_mode "$2"
+    fi
+    
+    return 0
+}
+
 # ============================================================================
 # POWER PROFILE FUNCTIONS (keeping your existing ones)
 # ============================================================================
 
 get_power_profile() {
-    # Try powerprofilesctl first (works on both KDE and GNOME)
-    if has_powerprofilesctl; then
-        echo "$(powerprofilesctl get)"
+    # Try powerprofilesctl first (works on both KDE and GNOME), but only if it actually works
+    if has_powerprofilesctl && powerprofilesctl list >/dev/null 2>&1; then
+        echo "$(powerprofilesctl get 2>/dev/null || echo 'unknown')"
         return 0
     fi
 
@@ -407,73 +889,118 @@ get_power_profile() {
         return 0
     fi
 
+    # Fallback - check if TLP is managing power
+    if should_use_tlp && systemctl is-active tlp >/dev/null 2>&1; then
+        echo "TLP-managed"
+        return 0
+    fi
+
     echo "unknown"
 }
 
 set_power_profile() {
     local mode="$1"
     local desktop=$(detect_desktop)
+    local profile_set=false
 
     case "$mode" in
         "power-saver"|"eco")
             # Apply TLP battery mode first for deeper power savings
             tlp_set_mode "bat"
 
-            if has_powerprofilesctl; then
-                powerprofilesctl set power-saver
-                success "Set power profile to power-saver via powerprofilesctl"
-            elif [ "$desktop" = "gnome" ] && has_gsettings; then
+            # Try powerprofilesctl only if power-profiles-daemon is available and working
+            if has_powerprofilesctl && powerprofilesctl list >/dev/null 2>&1; then
+                if powerprofilesctl set power-saver 2>/dev/null; then
+                    success "Set power profile to power-saver via powerprofilesctl"
+                    profile_set=true
+                fi
+            fi
+            
+            # Fallback to desktop-specific settings if powerprofilesctl failed
+            if [ "$profile_set" = false ] && [ "$desktop" = "gnome" ] && has_gsettings; then
                 gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'suspend'
                 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 1800
                 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 900
                 success "Applied power-saver settings via GNOME settings"
-            else
-                warning "Unable to set power profile - no suitable method found"
-                return 1
+                profile_set=true
+            fi
+            
+            # If TLP is handling power management, that's sufficient
+            if [ "$profile_set" = false ] && should_use_tlp; then
+                success "Power profile managed by TLP (battery mode)"
+                profile_set=true
+            fi
+            
+            if [ "$profile_set" = false ]; then
+                warning "Unable to set power profile - using TLP only"
             fi
 
-            # Apply additional eco mode settings
-            if [ -f "$SCRIPT_DIR/eco-mode.sh" ]; then
-                "$SCRIPT_DIR/eco-mode.sh"
-            fi
+            # Apply consolidated eco mode settings
+            apply_eco_mode
             ;;
         "performance")
             # Apply TLP AC mode first
             tlp_set_mode "ac"
 
-            if has_powerprofilesctl; then
-                powerprofilesctl set performance
-                success "Set power profile to performance via powerprofilesctl"
-            elif [ "$desktop" = "gnome" ] && has_gsettings; then
+            # Try powerprofilesctl only if power-profiles-daemon is available and working
+            if has_powerprofilesctl && powerprofilesctl list >/dev/null 2>&1; then
+                if powerprofilesctl set performance 2>/dev/null; then
+                    success "Set power profile to performance via powerprofilesctl"
+                    profile_set=true
+                fi
+            fi
+            
+            # Fallback to desktop-specific settings if powerprofilesctl failed
+            if [ "$profile_set" = false ] && [ "$desktop" = "gnome" ] && has_gsettings; then
                 gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'nothing'
                 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
                 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 0
                 success "Applied performance settings via GNOME settings"
-            else
-                warning "Unable to set power profile - no suitable method found"
-                return 1
+                profile_set=true
+            fi
+            
+            # If TLP is handling power management, that's sufficient
+            if [ "$profile_set" = false ] && should_use_tlp; then
+                success "Power profile managed by TLP (AC mode)"
+                profile_set=true
+            fi
+            
+            if [ "$profile_set" = false ]; then
+                warning "Unable to set power profile - using TLP only"
             fi
 
-            # Apply additional performance mode settings
-            if [ -f "$SCRIPT_DIR/performance-mode.sh" ]; then
-                "$SCRIPT_DIR/performance-mode.sh"
-            fi
+            # Apply consolidated performance mode settings
+            apply_performance_mode
             ;;
         "balanced")
             # Use balanced TLP mode (auto-detect AC/BAT)
             tlp_apply_settings
 
-            if has_powerprofilesctl; then
-                powerprofilesctl set balanced
-                success "Set power profile to balanced via powerprofilesctl"
-            elif [ "$desktop" = "gnome" ] && has_gsettings; then
+            # Try powerprofilesctl only if power-profiles-daemon is available and working
+            if has_powerprofilesctl && powerprofilesctl list >/dev/null 2>&1; then
+                if powerprofilesctl set balanced 2>/dev/null; then
+                    success "Set power profile to balanced via powerprofilesctl"
+                    profile_set=true
+                fi
+            fi
+            
+            # Fallback to desktop-specific settings if powerprofilesctl failed
+            if [ "$profile_set" = false ] && [ "$desktop" = "gnome" ] && has_gsettings; then
                 gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'suspend'
                 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 3600
                 gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 1800
                 success "Applied balanced settings via GNOME settings"
-            else
-                warning "Unable to set power profile - no suitable method found"
-                return 1
+                profile_set=true
+            fi
+            
+            # If TLP is handling power management, that's sufficient
+            if [ "$profile_set" = false ] && should_use_tlp; then
+                success "Power profile managed by TLP (auto mode)"
+                profile_set=true
+            fi
+            
+            if [ "$profile_set" = false ]; then
+                warning "Unable to set power profile - using TLP only"
             fi
             ;;
         *)
@@ -547,9 +1074,9 @@ apply_preset() {
 
     local errors=0
 
-    # Apply TLP mode first
+    # Apply preset-specific TLP configuration
     if [ -n "$TLP_MODE" ] && [ "$TLP_MODE" != "none" ]; then
-        tlp_set_mode "$TLP_MODE" || ((errors++))
+        tlp_apply_preset_config "$preset" "$TLP_MODE" || ((errors++))
     fi
 
     # Apply GPU mode (potentially requiring reboot)
@@ -564,6 +1091,7 @@ apply_preset() {
 
     # Apply NVIDIA performance settings based on GPU mode and power profile
     if [ -n "$GPU_MODE" ] && [[ "$GPU_MODE" == "hybrid" || "$GPU_MODE" == "nvidia" ]]; then
+        info "Applying NVIDIA optimizations for dGPU mode: $GPU_MODE"
         case "$POWER_PROFILE" in
             "power-saver")
                 set_nvidia_performance_mode "eco"
@@ -575,8 +1103,15 @@ apply_preset() {
                 set_nvidia_performance_mode "performance"
                 ;;
         esac
+        
+        # Apply additional optimizations for gaming/performance presets
+        if [[ "$preset" == "gaming-max" || "$preset" == "performance-dgpu" ]]; then
+            info "Applying enhanced gaming optimizations for $preset"
+            apply_enhanced_gaming_mode
+        fi
     elif [ -n "$GPU_MODE" ] && [ "$GPU_MODE" == "integrated" ]; then
-        # For integrated GPU mode, ensure NVIDIA is in lowest power state
+        # For integrated GPU mode, ensure NVIDIA is in lowest power state if accessible
+        info "Intel iGPU mode - setting NVIDIA to minimum power"
         set_nvidia_performance_mode "eco"
     fi
 
@@ -965,6 +1500,7 @@ show_help() {
     echo "  performance       - High performance mode (hybrid GPU + AC TLP)"
     echo "  performance-dgpu  - Performance with dGPU (nvidia GPU + AC TLP)"
     echo "  gaming-max        - Maximum gaming power (nvidia GPU + performance)"
+    echo "  gaming-max-mux    - Ultimate gaming with true hardware MUX switch"
     echo "  work-mode         - Productivity optimized (integrated + balanced)"
     echo "  developer-mode    - Development workloads (hybrid + performance)"
     echo ""
@@ -980,8 +1516,11 @@ show_help() {
     echo -e "${YELLOW}GPU Commands:${NC}"
     echo "  gpu-integrated    - Switch to integrated GPU only"
     echo "  gpu-hybrid        - Switch to hybrid GPU mode"
-    echo "  gpu-nvidia        - Switch to discrete/nvidia GPU"
-    echo "  gpu-status        - Show current GPU mode"
+    echo "  gpu-nvidia        - Switch to discrete/nvidia GPU (software)"
+    echo "  mux-discrete      - Enable true hardware MUX switch (BIOS-level)"
+    echo "  mux-hybrid        - Enable hardware hybrid mode (BIOS-level)"
+    echo "  mux-status        - Show hardware MUX switch status"
+    echo "  gpu-status        - Show current GPU mode (software + hardware)"
     echo ""
     echo -e "${YELLOW}System Commands:${NC}"
     echo "  status            - Show comprehensive power status"
@@ -1067,12 +1606,21 @@ case "$1" in
         set_power_profile "performance"
         ;;
     "balanced")
-        set_power_profile "balanced"
+        apply_preset "balanced"
         ;;
 
     # Preset management commands
     "list-presets")
         list_presets
+        ;;
+    "apply-preset")
+        if [ -n "$2" ]; then
+            apply_preset "$2"
+        else
+            error "Please specify preset name"
+            echo "Available presets:"
+            get_available_presets
+        fi
         ;;
 
     # GPU-specific commands
@@ -1088,10 +1636,51 @@ case "$1" in
     "gpu-status")
         echo "Current GPU mode: $(get_current_gpu_mode)"
         ;;
+    
+    # Hardware MUX switch commands
+    "mux-discrete"|"mux-nvidia")
+        info "Enabling true hardware MUX switch (BIOS-level discrete GPU)..."
+        set_gpu_mode "discrete-mux"
+        ;;
+    "mux-hybrid")
+        info "Setting hardware MUX to hybrid mode (BIOS-level)..."
+        set_hardware_mux_mode "hybrid"
+        ;;
+    "mux-status")
+        hw_status=$(get_hardware_mux_status)
+        current_mode=$(get_current_gpu_mode)
+        echo -e "${BLUE}🔄 Hardware MUX Switch Status${NC}"
+        echo "   Hardware MUX: $hw_status"
+        echo "   Current Mode: $current_mode"
+        if [ "$hw_status" = "Enabled" ]; then
+            echo "   Status: Hybrid mode (software GPU switching available)"
+        elif [ "$hw_status" = "Disabled" ]; then
+            echo "   Status: True MUX mode (direct dGPU connection)"
+        fi
+        ;;
+    "gaming-max-mux")
+        apply_preset "gaming-max-mux"
+        ;;
 
     # System commands (PRESERVED)
     "status")
         show_comprehensive_status
+        ;;
+    "health")
+        echo -e "${BLUE}🏥 System Health Monitoring${NC}"
+        echo "============================"
+        health_info=$(get_system_health)
+        echo "$health_info" | while IFS='=' read -r key value; do
+            case "$key" in
+                "TEMP") echo "  CPU Temperature: $value" ;;
+                "LOAD") echo "  System Load: $value" ;;
+                "BATTERY") echo "  Battery Status: $value" ;;
+                "AC_CONNECTED") echo "  AC Power: $value" ;;
+            esac
+        done
+        ;;
+    "recommend")
+        recommend_preset
         ;;
     "config")
         configure_system
@@ -1125,6 +1714,27 @@ case "$1" in
             sudo tlp-stat -s
         else
             error "TLP not available"
+        fi
+        ;;
+    "tlp-backup")
+        if [ -f "/etc/tlp.conf" ]; then
+            backup_file="/etc/tlp.conf.backup-$(date +%Y%m%d-%H%M%S)"
+            sudo cp "/etc/tlp.conf" "$backup_file"
+            success "TLP configuration backed up to $backup_file"
+        else
+            error "No TLP configuration found to backup"
+        fi
+        ;;
+    "tlp-restore")
+        if [ -f "/etc/tlp.conf.power-manager-backup" ]; then
+            log "Restoring original TLP configuration..."
+            sudo cp "/etc/tlp.conf.power-manager-backup" "/etc/tlp.conf"
+            sudo tlp start >/dev/null 2>&1
+            success "Original TLP configuration restored"
+        else
+            error "No power-manager backup found"
+            echo "Available backups:"
+            ls -la /etc/tlp.conf.backup-* 2>/dev/null || echo "  No backups found"
         fi
         ;;
 

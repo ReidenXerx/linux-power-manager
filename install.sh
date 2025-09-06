@@ -117,7 +117,7 @@ get_package_manager() {
 
 # Install required packages
 install_dependencies() {
-    log "Installing dependencies..."
+log "Installing dependencies..."
     
     case "$DISTRO" in
         "ubuntu"|"debian"|"pop"|"mint"|"elementary")
@@ -267,6 +267,25 @@ configure_tlp() {
         if systemctl is-enabled power-profiles-daemon >/dev/null 2>&1; then
             sudo systemctl mask power-profiles-daemon.service
             info "Masked power-profiles-daemon to avoid conflicts"
+        fi
+        
+        # Install preset-specific TLP configurations
+        if [ -d "$SCRIPT_DIR/configs/tlp-presets" ]; then
+            log "Installing TLP preset configurations..."
+            sudo mkdir -p "/usr/local/share/power-manager/tlp-presets"
+            sudo cp -r "$SCRIPT_DIR/configs/tlp-presets/"* "/usr/local/share/power-manager/tlp-presets/"
+            success "TLP preset configurations installed"
+        fi
+        
+        # Install default optimized TLP configuration if none exists
+        if [ ! -f "/etc/tlp.conf" ] && [ -f "$SCRIPT_DIR/configs/tlp-presets/balanced.conf" ]; then
+            log "Installing default balanced TLP configuration..."
+            sudo cp "$SCRIPT_DIR/configs/tlp-presets/balanced.conf" "/etc/tlp.conf"
+            success "Default TLP configuration installed"
+        elif [ ! -f "/etc/tlp.conf.power-manager-backup" ] && [ -f "/etc/tlp.conf" ]; then
+            log "Creating backup of existing TLP configuration..."
+            sudo cp "/etc/tlp.conf" "/etc/tlp.conf.power-manager-backup"
+            success "TLP configuration backup created"
         fi
         
         # Enable and start TLP
