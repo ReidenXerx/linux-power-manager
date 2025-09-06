@@ -43,6 +43,14 @@ A comprehensive, cross-distribution power management solution that provides inte
 - **Power-Aware**: Automatic GPU selection based on power preset
 - **Safe Operations**: Prevents accidental switches with confirmation prompts
 
+### 📡 **WiFi Power Optimization (Intel)**
+- **Intel-Specific Tuning**: Dedicated optimizations for Intel WiFi adapters (AX1775*/AX1790*/BE20*/BE401/BE1750*)
+- **Power Spike Reduction**: Reduces WiFi power spikes by up to 50% through iwlwifi parameter tuning
+- **Smart Power Levels**: Different WiFi power management per preset (aggressive/balanced/performance)
+- **U-APSD Support**: Enables Unscheduled Automatic Power Save Delivery for modern routers
+- **Scan Optimization**: Reduces aggressive background scanning that causes power draws
+- **Expected Savings**: 1-5W reduction in WiFi power consumption
+
 ### 💾 **Disk Management**
 - **Automatic Suspension**: Suspend inactive disks to save 2-8W per drive
 - **Smart Whitelisting**: Temporarily or permanently protect disks from suspension
@@ -132,6 +140,23 @@ power-control.sh gpu-status
 power-control.sh gpu-integrated    # Intel iGPU only (best battery)
 power-control.sh gpu-hybrid        # Both GPUs (automatic switching)
 power-control.sh gpu-nvidia        # NVIDIA dGPU only (max performance)
+```
+
+### WiFi Power Optimization (Intel adapters)
+
+```bash
+# Optimize WiFi power settings
+wifi-intel-optimizer.sh optimize
+
+# Check current WiFi power status
+wifi-intel-optimizer.sh status
+
+# Test different power levels
+wifi-intel-optimizer.sh test
+
+# Using aliases
+wifi-optimize       # Apply WiFi optimizations
+wifi-status         # Check WiFi power status
 ```
 
 ### Using Aliases (after installation)
