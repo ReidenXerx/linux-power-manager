@@ -55,6 +55,30 @@ journalctl -u power-control-monitor.timer
 sudo systemctl start power-control-startup.service
 ```
 
+## Recent Updates (v2.2.1)
+
+### 🔧 **Major Fixes Applied**
+- **Fixed Default Preset**: Changed from `ultra-eco` to `balanced` for better general usage
+- **Fixed Preset Switching**: `balanced` command now correctly uses `apply_preset` instead of legacy `set_power_profile`
+- **Enhanced TLP Compatibility**: Disabled `TLP_ONLY_ON_GNOME` restriction for broader desktop environment support
+- **GPU Switching Enabled**: Default configuration now enables GPU switching to support `supergfxctl`
+- **Improved Status Tracking**: Fixed preset tracking and status display to show correct active preset
+- **SupergfxCtl Integration**: Added support for modern GPU switching with supergfxctl daemon
+
+### 🎯 **Verification Commands**
+```bash
+# Test preset switching
+power-control.sh balanced
+power-control.sh status | grep "Active Preset"  # Should show "balanced"
+
+# Test GPU status (with supergfxctl)
+gpu-status
+supergfxctl --get
+
+# Test TLP integration
+power-control.sh tlp-status
+```
+
 ## Architecture Overview
 
 ### Core Components Structure
