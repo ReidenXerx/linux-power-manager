@@ -1,0 +1,17 @@
+[Unit]
+Description=WiFi Power Optimization Monitor
+Documentation=https://github.com/username/linux-power-manager
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wifi-intel-optimizer.sh runtime
+TimeoutStartSec=30
+User=root
+Environment=HOME=/root
+
+# Only run if Intel WiFi adapter is detected
+ExecCondition=/bin/bash -c 'lspci | grep -qi "intel.*network\\|intel.*wifi"'
+
+[Install]
+WantedBy=multi-user.target

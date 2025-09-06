@@ -256,6 +256,12 @@ install_services() {
         sudo systemctl enable disk-monitor.service
         sudo systemctl enable disk-monitor.timer
         
+        # Enable WiFi optimization services (only if Intel WiFi detected)
+        if lspci | grep -qi "intel.*network\|intel.*wifi"; then
+            sudo systemctl enable wifi-power-optimizer.service
+            sudo systemctl enable wifi-power-monitor.timer
+        fi
+        
         success "Systemd services installed and enabled"
     fi
 }
