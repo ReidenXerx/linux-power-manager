@@ -6,8 +6,8 @@ Wants=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/power-control.sh startup
-ExecStartPost=/usr/local/bin/wifi-intel-optimizer.sh runtime
+ExecStart=/usr/local/bin/power-control-modular.sh startup
+ExecStartPost=/usr/local/bin/power-control-modular.sh wifi-optimize
 RemainAfterExit=yes
 TimeoutStartSec=30
 User=root

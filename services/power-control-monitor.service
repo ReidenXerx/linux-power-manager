@@ -4,6 +4,6 @@ Documentation=https://github.com/username/linux-power-manager
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/power-control.sh monitor
+ExecStart=/usr/local/bin/power-control-modular.sh monitor
 User=root
 Environment=DISPLAY=:0

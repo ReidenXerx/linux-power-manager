@@ -748,6 +748,39 @@ process_modular_command() {
             fi
             ;;
         
+        # WiFi Optimization Commands
+        "wifi-optimize")
+            optimize_intel_wifi
+            ;;
+        "wifi-status")
+            show_wifi_status
+            ;;
+        "wifi-test")
+            test_wifi_power
+            ;;
+        
+        # Disk Management Commands
+        "disk-status")
+            show_disk_status
+            ;;
+        "disk-suspend")
+            suspend_disk "${args[0]}"
+            ;;
+        "disk-wake")
+            wake_disk "${args[0]}"
+            ;;
+        "disk-monitor")
+            monitor_disks
+            ;;
+        "disk-config")
+            configure_disk_management
+            ;;
+        
+        # General Monitoring Commands
+        "monitor")
+            general_monitoring
+            ;;
+        
         # Help
         "help"|"--help"|"-h")
             show_modular_help
@@ -797,6 +830,18 @@ show_modular_help() {
     echo "  work-mode              Apply work mode composite preset"
     echo "  developer-mode         Apply developer mode composite preset"
     echo ""
+    echo "WiFi Optimization Commands:"
+    echo "  wifi-optimize           Optimize Intel WiFi power settings"
+    echo "  wifi-status             Show WiFi power status"
+    echo "  wifi-test               Test WiFi power levels"
+    echo ""
+    echo "Disk Management Commands:"
+    echo "  disk-status             Show disk management status"
+    echo "  disk-suspend <disk>     Suspend specific disk"
+    echo "  disk-wake <disk>        Wake up specific disk"
+    echo "  disk-monitor            Monitor and suspend inactive disks"
+    echo "  disk-config             Configure disk management"
+    echo ""
     echo "Status Commands:"
     echo "  status                 Show modular system status"
     echo "  status-modular         Show detailed modular system status"
@@ -831,5 +876,311 @@ export -f list_system_presets
 export -f list_gpu_presets
 export -f list_composite_presets
 export -f modular_status_report
+# ============================================================================
+# WIFI OPTIMIZATION FUNCTIONS
+# ============================================================================
+
+# Optimize Intel WiFi power settings
+optimize_intel_wifi() {
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Optimizing Intel WiFi power settings..." "WIFI"
+    else
+        echo "Optimizing Intel WiFi power settings..."
+    fi
+    
+    # Check if Intel WiFi is present
+    if ! lspci | grep -i "intel" | grep -i "network" >/dev/null; then
+        if command -v error >/dev/null 2>&1; then
+            error "No Intel WiFi adapter detected"
+        else
+            echo "ERROR: No Intel WiFi adapter detected"
+        fi
+        return 1
+    fi
+    
+    # Get WiFi interface
+    local interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
+    if [ -z "$interface" ]; then
+        if command -v error >/dev/null 2>&1; then
+            error "No WiFi interface found"
+        else
+            echo "ERROR: No WiFi interface found"
+        fi
+        return 1
+    fi
+    
+    # Apply Intel WiFi optimizations
+    if command -v iw >/dev/null 2>&1; then
+        # Set power save mode
+        sudo iw dev "$interface" set power_save on 2>/dev/null || true
+        
+        # Set U-APSD (if supported)
+        sudo iw dev "$interface" set uapsd on 2>/dev/null || true
+        
+        if command -v success >/dev/null 2>&1; then
+            success "Intel WiFi power optimizations applied" "WIFI"
+        else
+            echo "SUCCESS: Intel WiFi power optimizations applied"
+        fi
+    else
+        if command -v warning >/dev/null 2>&1; then
+            warning "iw command not available, skipping runtime optimizations" "WIFI"
+        else
+            echo "WARNING: iw command not available, skipping runtime optimizations"
+        fi
+    fi
+}
+
+# Show WiFi power status
+show_wifi_status() {
+    echo "WiFi Power Status:"
+    echo "=================="
+    
+    # Check Intel WiFi
+    if lspci | grep -i "intel" | grep -i "network" >/dev/null; then
+        echo "✅ Intel WiFi adapter detected"
+        
+        # Get WiFi interface
+        local interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
+        if [ -n "$interface" ]; then
+            echo "📶 WiFi Interface: $interface"
+            
+            # Check power save status
+            if command -v iw >/dev/null 2>&1; then
+                local power_save=$(iw dev "$interface" get power_save 2>/dev/null || echo "unknown")
+                echo "🔋 Power Save: $power_save"
+                
+                local uapsd=$(iw dev "$interface" get uapsd 2>/dev/null || echo "unknown")
+                echo "⚡ U-APSD: $uapsd"
+            fi
+        fi
+    else
+        echo "❌ No Intel WiFi adapter detected"
+    fi
+}
+
+# Test WiFi power levels
+test_wifi_power() {
+    echo "WiFi Power Test:"
+    echo "================"
+    
+    local interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
+    if [ -z "$interface" ]; then
+        echo "ERROR: No WiFi interface found"
+        return 1
+    fi
+    
+    echo "Testing WiFi interface: $interface"
+    
+    # Test different power levels
+    for level in on off; do
+        echo "Testing power save: $level"
+        sudo iw dev "$interface" set power_save "$level" 2>/dev/null || echo "Failed to set power_save $level"
+        sleep 2
+        
+        local current=$(iw dev "$interface" get power_save 2>/dev/null || echo "unknown")
+        echo "Current power save: $current"
+        echo ""
+    done
+    
+    echo "WiFi power test completed"
+}
+
+# ============================================================================
+# DISK MANAGEMENT FUNCTIONS
+# ============================================================================
+
+# Show disk management status
+show_disk_status() {
+    echo "Disk Management Status:"
+    echo "======================="
+    
+    # List all disks
+    echo "Available Disks:"
+    lsblk -d -o NAME,SIZE,TYPE,STATE | grep -E "(disk|nvme)" | while read line; do
+        echo "  $line"
+    done
+    
+    echo ""
+    echo "Disk Power States:"
+    for disk in /sys/block/*/device/power_state; do
+        if [ -f "$disk" ] 2>/dev/null; then
+            local disk_name=$(basename "$(dirname "$(dirname "$disk")")")
+            local power_state=$(cat "$disk" 2>/dev/null || echo "unknown")
+            echo "  $disk_name: $power_state"
+        fi
+    done
+}
+
+# Suspend specific disk
+suspend_disk() {
+    local disk="$1"
+    
+    if [ -z "$disk" ]; then
+        echo "ERROR: Please specify disk name (e.g., nvme1n1)"
+        return 1
+    fi
+    
+    if [ ! -b "/dev/$disk" ]; then
+        echo "ERROR: Disk /dev/$disk not found"
+        return 1
+    fi
+    
+    echo "Suspending disk: $disk"
+    
+    # Check if disk is system disk
+    if mount | grep -q "/dev/$disk"; then
+        echo "WARNING: Disk $disk appears to be mounted. Suspending may cause issues."
+        read -p "Continue? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Cancelled"
+            return 1
+        fi
+    fi
+    
+    # Suspend disk
+    echo "1" | sudo tee "/sys/block/$disk/device/power_state" >/dev/null 2>&1
+    
+    if [ $? -eq 0 ]; then
+        echo "SUCCESS: Disk $disk suspended"
+    else
+        echo "ERROR: Failed to suspend disk $disk"
+        return 1
+    fi
+}
+
+# Wake up specific disk
+wake_disk() {
+    local disk="$1"
+    
+    if [ -z "$disk" ]; then
+        echo "ERROR: Please specify disk name (e.g., nvme1n1)"
+        return 1
+    fi
+    
+    if [ ! -b "/dev/$disk" ]; then
+        echo "ERROR: Disk /dev/$disk not found"
+        return 1
+    fi
+    
+    echo "Waking up disk: $disk"
+    
+    # Wake up disk
+    echo "0" | sudo tee "/sys/block/$disk/device/power_state" >/dev/null 2>&1
+    
+    if [ $? -eq 0 ]; then
+        echo "SUCCESS: Disk $disk woken up"
+    else
+        echo "ERROR: Failed to wake up disk $disk"
+        return 1
+    fi
+}
+
+# Monitor and suspend inactive disks
+monitor_disks() {
+    echo "Disk Monitoring:"
+    echo "================"
+    
+    # Find non-system disks
+    local system_disks=$(mount | grep -E "^/dev/" | sed 's|/dev/||' | cut -d' ' -f1 | sed 's/[0-9]*$//' | sort -u)
+    
+    for disk in /sys/block/*/device/power_state; do
+        if [ -f "$disk" ] 2>/dev/null; then
+            local disk_name=$(basename "$(dirname "$(dirname "$disk")")")
+            
+            # Skip system disks
+            if echo "$system_disks" | grep -q "^$disk_name"; then
+                continue
+            fi
+            
+            # Check if disk is active
+            local power_state=$(cat "$disk" 2>/dev/null || echo "unknown")
+            echo "Disk $disk_name: $power_state"
+            
+            # Check disk activity
+            local stat_file="/sys/block/$disk_name/stat"
+            if [ -f "$stat_file" ]; then
+                local reads=$(awk '{print $1}' "$stat_file")
+                local writes=$(awk '{print $5}' "$stat_file")
+                echo "  Reads: $reads, Writes: $writes"
+            fi
+        fi
+    done
+}
+
+# Configure disk management
+configure_disk_management() {
+    echo "Disk Management Configuration:"
+    echo "=============================="
+    echo ""
+    echo "This would open an interactive configuration menu."
+    echo "For now, disk management is handled by the standalone disk-manager.sh script."
+    echo ""
+    echo "Available commands:"
+    echo "  disk-status          - Show disk status"
+    echo "  disk-suspend <disk>  - Suspend specific disk"
+    echo "  disk-wake <disk>     - Wake up specific disk"
+    echo "  disk-monitor          - Monitor disk activity"
+    echo ""
+    echo "For advanced configuration, use: ./scripts/disk-manager.sh config"
+}
+
+# General monitoring function
+general_monitoring() {
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Running general system monitoring..." "MONITOR"
+    else
+        echo "Running general system monitoring..."
+    fi
+    
+    echo "Modular Power Management System - Monitoring Report"
+    echo "=================================================="
+    echo ""
+    
+    # System status
+    echo "📊 System Status:"
+    modular_status_report
+    echo ""
+    
+    # WiFi status
+    echo "📶 WiFi Status:"
+    show_wifi_status
+    echo ""
+    
+    # Disk status
+    echo "💾 Disk Status:"
+    show_disk_status
+    echo ""
+    
+    # Health check if available
+    if command -v comprehensive_health_check >/dev/null 2>&1; then
+        echo "🔍 Health Check:"
+        comprehensive_health_check
+        echo ""
+    fi
+    
+    # Metrics if available
+    if command -v collect_system_metrics >/dev/null 2>&1; then
+        echo "📈 System Metrics:"
+        collect_system_metrics
+        echo ""
+    fi
+    
+    if command -v success >/dev/null 2>&1; then
+        success "General monitoring completed" "MONITOR"
+    else
+        echo "SUCCESS: General monitoring completed"
+    fi
+}
+
 export -f process_modular_command
 export -f show_modular_help
+export -f optimize_intel_wifi
+export -f show_wifi_status
+export -f test_wifi_power
+export -f show_disk_status
+export -f suspend_disk
+export -f wake_disk
+export -f monitor_disks
+export -f configure_disk_management
+export -f general_monitoring
