@@ -386,7 +386,8 @@ apply_system_preset() {
     fi
     
     # Store current system preset
-    echo "$preset" > /tmp/power-manager-current-system-preset 2>/dev/null || true
+    mkdir -p "$HOME/.cache/power-manager" 2>/dev/null || true
+    echo "$preset" > "$HOME/.cache/power-manager/current-system-preset" 2>/dev/null || true
     
     if [ $errors -eq 0 ]; then
         success "System preset '$preset' applied successfully"
@@ -434,7 +435,8 @@ apply_gpu_preset() {
     fi
     
     # Store current GPU preset
-    echo "$preset" > /tmp/power-manager-current-gpu-preset 2>/dev/null || true
+    mkdir -p "$HOME/.cache/power-manager" 2>/dev/null || true
+    echo "$preset" > "$HOME/.cache/power-manager/current-gpu-preset" 2>/dev/null || true
     
     if [ $errors -eq 0 ]; then
         success "GPU preset '$preset' applied successfully"
@@ -484,7 +486,8 @@ apply_composite_preset() {
     fi
     
     # Store current composite preset
-    echo "$preset" > /tmp/power-manager-current-composite-preset 2>/dev/null || true
+    mkdir -p "$HOME/.cache/power-manager" 2>/dev/null || true
+    echo "$preset" > "$HOME/.cache/power-manager/current-composite-preset" 2>/dev/null || true
     
     if [ $errors -eq 0 ]; then
         success "Composite preset '$preset' applied successfully"
@@ -581,16 +584,16 @@ modular_status_report() {
     local current_gpu="unknown"
     local current_composite="unknown"
     
-    if [ -f "/tmp/power-manager-current-system-preset" ]; then
-        current_system=$(cat /tmp/power-manager-current-system-preset)
+    if [ -f "$HOME/.cache/power-manager/current-system-preset" ]; then
+        current_system=$(cat "$HOME/.cache/power-manager/current-system-preset")
     fi
     
-    if [ -f "/tmp/power-manager-current-gpu-preset" ]; then
-        current_gpu=$(cat /tmp/power-manager-current-gpu-preset)
+    if [ -f "$HOME/.cache/power-manager/current-gpu-preset" ]; then
+        current_gpu=$(cat "$HOME/.cache/power-manager/current-gpu-preset")
     fi
     
-    if [ -f "/tmp/power-manager-current-composite-preset" ]; then
-        current_composite=$(cat /tmp/power-manager-current-composite-preset)
+    if [ -f "$HOME/.cache/power-manager/current-composite-preset" ]; then
+        current_composite=$(cat "$HOME/.cache/power-manager/current-composite-preset")
     fi
     
     echo "  System Preset: $current_system"
@@ -758,6 +761,12 @@ process_modular_command() {
         "wifi-test")
             test_wifi_power
             ;;
+        "wifi-disable")
+            disable_wifi_optimization
+            ;;
+        "wifi-enable")
+            enable_wifi_optimization
+            ;;
         
         # Disk Management Commands
         "disk-status")
@@ -774,6 +783,12 @@ process_modular_command() {
             ;;
         "disk-config")
             configure_disk_management
+            ;;
+        "disk-disable")
+            disable_disk_management
+            ;;
+        "disk-enable")
+            enable_disk_management
             ;;
         
         # General Monitoring Commands
@@ -834,6 +849,8 @@ show_modular_help() {
     echo "  wifi-optimize           Optimize Intel WiFi power settings"
     echo "  wifi-status             Show WiFi power status"
     echo "  wifi-test               Test WiFi power levels"
+    echo "  wifi-disable            Disable WiFi optimization module"
+    echo "  wifi-enable             Enable WiFi optimization module"
     echo ""
     echo "Disk Management Commands:"
     echo "  disk-status             Show disk management status"
@@ -841,6 +858,8 @@ show_modular_help() {
     echo "  disk-wake <disk>        Wake up specific disk"
     echo "  disk-monitor            Monitor and suspend inactive disks"
     echo "  disk-config             Configure disk management"
+    echo "  disk-disable            Disable disk management module"
+    echo "  disk-enable             Enable disk management module"
     echo ""
     echo "Status Commands:"
     echo "  status                 Show modular system status"
@@ -1173,6 +1192,115 @@ general_monitoring() {
     fi
 }
 
+# ============================================================================
+# MODULE DISABLE/ENABLE FUNCTIONS
+# ============================================================================
+
+# Disable WiFi optimization module
+disable_wifi_optimization() {
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Disabling WiFi optimization module..." "WIFI"
+    else
+        echo "Disabling WiFi optimization module..."
+    fi
+    
+    # Stop and disable WiFi services
+    sudo systemctl stop wifi-power-monitor.service 2>/dev/null || true
+    sudo systemctl stop wifi-power-monitor.timer 2>/dev/null || true
+    sudo systemctl stop wifi-power-optimizer.service 2>/dev/null || true
+    sudo systemctl disable wifi-power-monitor.timer 2>/dev/null || true
+    sudo systemctl disable wifi-power-optimizer.service 2>/dev/null || true
+    
+    # Create disable flag
+    mkdir -p "$HOME/.config"
+    touch "$HOME/.config/wifi-optimization-disabled"
+    
+    if command -v success >/dev/null 2>&1; then
+        success "WiFi optimization module disabled" "WIFI"
+    else
+        echo "✅ WiFi optimization module disabled"
+    fi
+    echo "   Services stopped and disabled"
+    echo "   To re-enable: power-control wifi-enable"
+}
+
+# Enable WiFi optimization module
+enable_wifi_optimization() {
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Enabling WiFi optimization module..." "WIFI"
+    else
+        echo "Enabling WiFi optimization module..."
+    fi
+    
+    # Remove disable flag
+    rm -f "$HOME/.config/wifi-optimization-disabled"
+    
+    # Enable and start WiFi services
+    sudo systemctl enable wifi-power-monitor.timer 2>/dev/null || true
+    sudo systemctl enable wifi-power-optimizer.service 2>/dev/null || true
+    sudo systemctl start wifi-power-optimizer.service 2>/dev/null || true
+    sudo systemctl start wifi-power-monitor.timer 2>/dev/null || true
+    
+    if command -v success >/dev/null 2>&1; then
+        success "WiFi optimization module enabled" "WIFI"
+    else
+        echo "✅ WiFi optimization module enabled"
+    fi
+    echo "   Services enabled and started"
+    echo "   WiFi optimization will run automatically"
+}
+
+# Disable disk management module
+disable_disk_management() {
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Disabling disk management module..." "DISK"
+    else
+        echo "Disabling disk management module..."
+    fi
+    
+    # Stop and disable disk services
+    sudo systemctl stop disk-monitor.service 2>/dev/null || true
+    sudo systemctl stop disk-monitor.timer 2>/dev/null || true
+    sudo systemctl disable disk-monitor.timer 2>/dev/null || true
+    
+    # Create disable flag
+    mkdir -p "$HOME/.config"
+    touch "$HOME/.config/disk-management-disabled"
+    
+    if command -v success >/dev/null 2>&1; then
+        success "Disk management module disabled" "DISK"
+    else
+        echo "✅ Disk management module disabled"
+    fi
+    echo "   Services stopped and disabled"
+    echo "   No automatic disk suspension will occur"
+    echo "   To re-enable: power-control disk-enable"
+}
+
+# Enable disk management module
+enable_disk_management() {
+    if command -v log_info >/dev/null 2>&1; then
+        log_info "Enabling disk management module..." "DISK"
+    else
+        echo "Enabling disk management module..."
+    fi
+    
+    # Remove disable flag
+    rm -f "$HOME/.config/disk-management-disabled"
+    
+    # Enable and start disk services
+    sudo systemctl enable disk-monitor.timer 2>/dev/null || true
+    sudo systemctl start disk-monitor.timer 2>/dev/null || true
+    
+    if command -v success >/dev/null 2>&1; then
+        success "Disk management module enabled" "DISK"
+    else
+        echo "✅ Disk management module enabled"
+    fi
+    echo "   Services enabled and started"
+    echo "   Automatic disk suspension will resume"
+}
+
 export -f process_modular_command
 export -f show_modular_help
 export -f optimize_intel_wifi
@@ -1184,3 +1312,7 @@ export -f wake_disk
 export -f monitor_disks
 export -f configure_disk_management
 export -f general_monitoring
+export -f disable_wifi_optimization
+export -f enable_wifi_optimization
+export -f disable_disk_management
+export -f enable_disk_management

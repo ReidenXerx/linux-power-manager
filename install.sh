@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Linux Power Manager - Universal Installer
-# Supports multiple Linux distributions with automatic detection
-# Version: 1.0.0
+# Linux Power Manager - Comprehensive Modular Installer
+# Installs the complete modular power management system with all components
+# Version: 2.0.0
 
 set -e
 
@@ -18,14 +18,21 @@ NC='\033[0m' # No Color
 # Script paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_PREFIX="/usr/local/bin"
+LIB_PREFIX="/usr/local/share/power-manager"
 CONFIG_DIR="$HOME/.config"
 SERVICE_DIR="/etc/systemd/system"
+PRESETS_DIR="/usr/local/share/power-manager/presets"
 
 # Installation settings
 INSTALL_SERVICES=true
 INSTALL_TLP=true
-INSTALL_ENVYCONTROL=false
-ENABLE_GPU_SWITCHING=false
+INSTALL_DEPENDENCIES=true
+INSTALL_ALIASES=true
+INSTALL_DESKTOP_SHORTCUTS=true
+INSTALL_MAN_PAGES=true
+INSTALL_SHELL_COMPLETION=true
+ENABLE_GPU_SWITCHING=true
+ENABLE_INTEL_OPTIMIZATIONS=true
 
 # Logging functions
 log() {
@@ -62,525 +69,770 @@ detect_distro() {
         . /etc/os-release
         DISTRO=$ID
         DISTRO_VERSION=$VERSION_ID
-        DISTRO_NAME=$PRETTY_NAME
-    elif [ -f /etc/redhat-release ]; then
-        DISTRO="rhel"
-        DISTRO_NAME=$(cat /etc/redhat-release)
-    elif [ -f /etc/debian_version ]; then
-        DISTRO="debian"
-        DISTRO_NAME="Debian $(cat /etc/debian_version)"
     else
-        DISTRO="unknown"
-        DISTRO_NAME="Unknown Linux"
+        error "Cannot detect Linux distribution"
+        exit 1
     fi
     
-    log "Detected: $DISTRO_NAME"
+    info "Detected distribution: $DISTRO $DISTRO_VERSION"
 }
 
-# Get package manager for the distribution
-get_package_manager() {
-    case "$DISTRO" in
-        "ubuntu"|"debian"|"pop"|"mint"|"elementary")
-            PKG_MANAGER="apt"
-            PKG_INSTALL="sudo apt update && sudo apt install -y"
-            PKG_CHECK="dpkg -l | grep -q"
+# Install dependencies
+install_dependencies() {
+    if [ "$INSTALL_DEPENDENCIES" != "true" ]; then
+        info "Skipping dependency installation"
+        return 0
+    fi
+    
+    log "Installing dependencies for $DISTRO..."
+    
+    case $DISTRO in
+        ubuntu|debian|pop|elementary)
+            sudo apt update
+            sudo apt install -y \
+                tlp tlp-rdw \
+                smartmontools \
+                hdparm \
+                lsof \
+                curl \
+                wget \
+                jq \
+                systemd \
+                bash-completion
             ;;
-        "fedora"|"rhel"|"centos"|"rocky"|"almalinux")
-            PKG_MANAGER="dnf"
-            PKG_INSTALL="sudo dnf install -y"
-            PKG_CHECK="rpm -q"
+        fedora|rhel|centos|rocky|alma)
+            sudo dnf install -y \
+                tlp tlp-rdw \
+                smartmontools \
+                hdparm \
+                lsof \
+                curl \
+                wget \
+                jq \
+                systemd \
+                bash-completion
             ;;
-        "opensuse"|"opensuse-leap"|"opensuse-tumbleweed")
-            PKG_MANAGER="zypper"
-            PKG_INSTALL="sudo zypper install -y"
-            PKG_CHECK="rpm -q"
+        arch|manjaro)
+            sudo pacman -S --noconfirm \
+                tlp \
+                smartmontools \
+                hdparm \
+                lsof \
+                curl \
+                wget \
+                jq \
+                systemd \
+                bash-completion
             ;;
-        "arch"|"manjaro"|"endeavouros")
-            PKG_MANAGER="pacman"
-            PKG_INSTALL="sudo pacman -S --noconfirm"
-            PKG_CHECK="pacman -Q"
+        opensuse*|sles)
+            sudo zypper install -y \
+                tlp \
+                smartmontools \
+                hdparm \
+                lsof \
+                curl \
+                wget \
+                jq \
+                systemd \
+                bash-completion
             ;;
-        "alpine")
-            PKG_MANAGER="apk"
-            PKG_INSTALL="sudo apk add"
-            PKG_CHECK="apk info | grep -q"
+        alpine)
+            sudo apk add \
+                tlp \
+                smartmontools \
+                hdparm \
+                lsof \
+                curl \
+                wget \
+                jq \
+                bash-completion
             ;;
         *)
-            error "Unsupported distribution: $DISTRO"
-            echo "Supported distributions: Ubuntu, Debian, Fedora, openSUSE, Arch Linux, Alpine"
-            exit 1
+            warning "Unsupported distribution: $DISTRO"
+            warning "Please install dependencies manually: tlp, smartmontools, hdparm, lsof"
             ;;
     esac
     
-    info "Using package manager: $PKG_MANAGER"
+    success "Dependencies installed successfully"
 }
 
-# Install required packages
-install_dependencies() {
-log "Installing dependencies..."
-    
-    case "$DISTRO" in
-        "ubuntu"|"debian"|"pop"|"mint"|"elementary")
-            DEPS="bc acpi lm-sensors curl wget git"
-            if [ "$INSTALL_TLP" = true ]; then
-                DEPS="$DEPS tlp tlp-rdw"
-            fi
-            ;;
-        "fedora"|"rhel"|"centos"|"rocky"|"almalinux")
-            DEPS="bc acpi lm_sensors curl wget git"
-            if [ "$INSTALL_TLP" = true ]; then
-                DEPS="$DEPS tlp tlp-rdw"
-            fi
-            ;;
-        "opensuse"|"opensuse-leap"|"opensuse-tumbleweed")
-            DEPS="bc acpi sensors curl wget git"
-            if [ "$INSTALL_TLP" = true ]; then
-                DEPS="$DEPS tlp tlp-rdw"
-            fi
-            ;;
-        "arch"|"manjaro"|"endeavouros")
-            DEPS="bc acpi lm_sensors curl wget git"
-            if [ "$INSTALL_TLP" = true ]; then
-                DEPS="$DEPS tlp tlp-rdw"
-            fi
-            ;;
-        "alpine")
-            DEPS="bc acpi lm-sensors curl wget git"
-            ;;
-    esac
-    
-    eval "$PKG_INSTALL $DEPS"
-    success "Dependencies installed"
-}
-
-# Install envycontrol for GPU switching (optional)
-install_envycontrol() {
-    if [ "$INSTALL_ENVYCONTROL" = true ]; then
-        log "Installing envycontrol for GPU switching..."
-        
-        if command -v pip3 >/dev/null 2>&1; then
-            pip3 install --user envycontrol
-            success "envycontrol installed via pip3"
-        elif command -v pipx >/dev/null 2>&1; then
-            pipx install envycontrol
-            success "envycontrol installed via pipx"
-        else
-            warning "pip3/pipx not found. Installing envycontrol manually..."
-            git clone https://github.com/bayasdev/envycontrol.git /tmp/envycontrol
-            cd /tmp/envycontrol
-            sudo python3 setup.py install
-            cd "$SCRIPT_DIR"
-            rm -rf /tmp/envycontrol
-            success "envycontrol installed manually"
-        fi
+# Install GPU switching tools
+install_gpu_tools() {
+    if [ "$ENABLE_GPU_SWITCHING" != "true" ]; then
+        info "Skipping GPU switching tools installation"
+        return 0
     fi
+    
+    log "Installing GPU switching tools..."
+    
+    # Install envycontrol
+    if ! command -v envycontrol >/dev/null 2>&1; then
+        log "Installing envycontrol..."
+        case $DISTRO in
+            ubuntu|debian|pop|elementary)
+                sudo apt install -y python3-pip
+                pip3 install --user envycontrol
+                ;;
+            fedora|rhel|centos|rocky|alma)
+                sudo dnf install -y python3-pip
+                pip3 install --user envycontrol
+                ;;
+            arch|manjaro)
+                sudo pacman -S --noconfirm python-pip
+                pip install --user envycontrol
+                ;;
+            *)
+                warning "Please install envycontrol manually: pip install envycontrol"
+                ;;
+        esac
+    fi
+    
+    # Install supergfxctl
+    if ! command -v supergfxctl >/dev/null 2>&1; then
+        log "Installing supergfxctl..."
+        case $DISTRO in
+            ubuntu|debian|pop|elementary)
+                sudo apt install -y supergfxctl
+                ;;
+            fedora|rhel|centos|rocky|alma)
+                sudo dnf install -y supergfxctl
+                ;;
+            arch|manjaro)
+                sudo pacman -S --noconfirm supergfxctl
+                ;;
+            *)
+                warning "Please install supergfxctl manually"
+            ;;
+    esac
+    fi
+    
+    success "GPU switching tools installed successfully"
 }
 
-# Install scripts
-install_scripts() {
-    log "Installing power management scripts..."
+# Create directory structure
+create_directories() {
+    log "Creating directory structure..."
     
-    # Copy main scripts
-    sudo cp "$SCRIPT_DIR/scripts/power-control.sh" "$INSTALL_PREFIX/"
-    sudo cp "$SCRIPT_DIR/scripts/power-status.sh" "$INSTALL_PREFIX/"
+    sudo mkdir -p "$LIB_PREFIX/lib"
+    sudo mkdir -p "$LIB_PREFIX/presets/system-presets"
+    sudo mkdir -p "$LIB_PREFIX/presets/gpu-presets"
+    sudo mkdir -p "$LIB_PREFIX/presets/composite-presets"
+    sudo mkdir -p "$CONFIG_DIR"
+    
+    # Create user directories
+    mkdir -p "$HOME/.cache/power-manager"
+    mkdir -p "$HOME/.local/share/power-manager"
+    
+    success "Directory structure created"
+}
+
+# Install main scripts
+install_scripts() {
+    log "Installing main scripts..."
+    
+    # Install power-control-modular.sh
+    sudo cp "$SCRIPT_DIR/scripts/power-control-modular.sh" "$INSTALL_PREFIX/"
+    sudo chmod +x "$INSTALL_PREFIX/power-control-modular.sh"
+    
+    # Create symlink for easy access
+    sudo ln -sf "$INSTALL_PREFIX/power-control-modular.sh" "$INSTALL_PREFIX/power-control"
+    
+    # Install disk-manager.sh
     sudo cp "$SCRIPT_DIR/scripts/disk-manager.sh" "$INSTALL_PREFIX/"
-    sudo cp "$SCRIPT_DIR/scripts/wifi-intel-optimizer.sh" "$INSTALL_PREFIX/"
-    sudo chmod +x "$INSTALL_PREFIX/power-control.sh"
-    sudo chmod +x "$INSTALL_PREFIX/power-status.sh"
     sudo chmod +x "$INSTALL_PREFIX/disk-manager.sh"
+    
+    # Install wifi-intel-optimizer.sh
+    sudo cp "$SCRIPT_DIR/scripts/wifi-intel-optimizer.sh" "$INSTALL_PREFIX/"
     sudo chmod +x "$INSTALL_PREFIX/wifi-intel-optimizer.sh"
     
-    success "Scripts installed to $INSTALL_PREFIX"
+    # Create command symlinks
+    sudo ln -sf "$INSTALL_PREFIX/disk-manager.sh" "$INSTALL_PREFIX/disk-manager"
+    sudo ln -sf "$INSTALL_PREFIX/wifi-intel-optimizer.sh" "$INSTALL_PREFIX/wifi-intel-optimizer"
+    
+    success "Main scripts installed"
 }
 
-# Install configurations
-install_configs() {
-    log "Installing configuration files..."
+# Install libraries
+install_libraries() {
+    log "Installing libraries..."
     
-    # Create config directory
-    mkdir -p "$CONFIG_DIR"
+    # Install all library files
+    sudo cp "$SCRIPT_DIR/lib/"*.sh "$LIB_PREFIX/lib/"
+    sudo chmod +x "$LIB_PREFIX/lib/"*.sh
     
-    # Copy config files
-    if [ ! -f "$CONFIG_DIR/power-control.conf" ]; then
-        cp "$SCRIPT_DIR/configs/power-control.conf" "$CONFIG_DIR/"
-    else
-        warning "Config file exists, creating backup..."
-        cp "$CONFIG_DIR/power-control.conf" "$CONFIG_DIR/power-control.conf.backup"
-        cp "$SCRIPT_DIR/configs/power-control.conf" "$CONFIG_DIR/"
+    success "Libraries installed"
+}
+
+# Install presets
+install_presets() {
+    log "Installing presets..."
+    
+    # Install system presets (exclude backup directories)
+    if [ -d "$SCRIPT_DIR/presets/system-presets" ]; then
+        sudo find "$SCRIPT_DIR/presets/system-presets" -name "*.conf" -not -path "*/backup*" -exec cp {} "$LIB_PREFIX/presets/system-presets/" \;
     fi
     
-    if [ ! -f "$CONFIG_DIR/power-presets.conf" ]; then
-        cp "$SCRIPT_DIR/configs/power-presets.conf" "$CONFIG_DIR/"
-    else
-        warning "Presets file exists, creating backup..."
-        cp "$CONFIG_DIR/power-presets.conf" "$CONFIG_DIR/power-presets.conf.backup"
-        cp "$SCRIPT_DIR/configs/power-presets.conf" "$CONFIG_DIR/"
+    # Install GPU presets
+    if [ -d "$SCRIPT_DIR/presets/gpu-presets" ]; then
+        sudo find "$SCRIPT_DIR/presets/gpu-presets" -name "*.conf" -not -path "*/backup*" -exec cp {} "$LIB_PREFIX/presets/gpu-presets/" \;
     fi
     
-    # Copy power-status config if exists
-    if [ -f "$SCRIPT_DIR/configs/power-manager.conf" ]; then
-        cp "$SCRIPT_DIR/configs/power-manager.conf" "$CONFIG_DIR/"
+    # Install composite presets
+    if [ -d "$SCRIPT_DIR/presets/composite-presets" ]; then
+        sudo find "$SCRIPT_DIR/presets/composite-presets" -name "*.conf" -not -path "*/backup*" -exec cp {} "$LIB_PREFIX/presets/composite-presets/" \;
     fi
     
-    # Copy disk-manager config
-    if [ ! -f "$CONFIG_DIR/disk-manager.conf" ]; then
-        cp "$SCRIPT_DIR/configs/disk-manager.conf" "$CONFIG_DIR/"
-    else
-        warning "Disk config exists, creating backup..."
-        cp "$CONFIG_DIR/disk-manager.conf" "$CONFIG_DIR/disk-manager.conf.backup"
-        cp "$SCRIPT_DIR/configs/disk-manager.conf" "$CONFIG_DIR/"
-    fi
-    
-    # Set GPU switching preference
-    if [ "$ENABLE_GPU_SWITCHING" = true ]; then
-        sed -i 's/GPU_SWITCHING_ENABLED=false/GPU_SWITCHING_ENABLED=true/' "$CONFIG_DIR/power-control.conf"
-    fi
-    
-    success "Configuration files installed"
+    success "Presets installed"
 }
 
 # Install systemd services
 install_services() {
-    if [ "$INSTALL_SERVICES" = true ]; then
+    if [ "$INSTALL_SERVICES" != "true" ]; then
+        info "Skipping systemd services installation"
+        return 0
+    fi
+    
         log "Installing systemd services..."
         
+    # Install all service files
         sudo cp "$SCRIPT_DIR/services/"*.service "$SERVICE_DIR/"
         sudo cp "$SCRIPT_DIR/services/"*.timer "$SERVICE_DIR/"
         
+    # Reload systemd
         sudo systemctl daemon-reload
         
         # Enable services
         sudo systemctl enable power-control-startup.service
         sudo systemctl enable power-control-wake.service
+    sudo systemctl enable power-control-monitor.service
         sudo systemctl enable power-control-monitor.timer
         sudo systemctl enable disk-monitor.service
         sudo systemctl enable disk-monitor.timer
-        
-        # Enable WiFi optimization services (only if Intel WiFi detected)
-        if lspci | grep -qi "intel.*network\|intel.*wifi"; then
-            sudo systemctl enable wifi-power-optimizer.service
-            sudo systemctl enable wifi-power-monitor.timer
-        fi
+    sudo systemctl enable wifi-power-monitor.service
+    sudo systemctl enable wifi-power-monitor.timer
+    sudo systemctl enable wifi-power-optimizer.service
+    
+    # Start services
+    sudo systemctl start power-control-startup.service
+    sudo systemctl start power-control-monitor.timer
+    sudo systemctl start disk-monitor.timer
+    sudo systemctl start wifi-power-monitor.timer
+    sudo systemctl start wifi-power-optimizer.service
         
         success "Systemd services installed and enabled"
-    fi
 }
 
 # Configure TLP
 configure_tlp() {
-    if [ "$INSTALL_TLP" = true ]; then
-        log "Configuring TLP..."
-        
-        # Disable conflicting services
-        if systemctl is-enabled power-profiles-daemon >/dev/null 2>&1; then
-            sudo systemctl mask power-profiles-daemon.service
-            info "Masked power-profiles-daemon to avoid conflicts"
-        fi
-        
-        # Install preset-specific TLP configurations
-        if [ -d "$SCRIPT_DIR/configs/tlp-presets" ]; then
-            log "Installing TLP preset configurations..."
-            sudo mkdir -p "/usr/local/share/power-manager/tlp-presets"
-            sudo cp -r "$SCRIPT_DIR/configs/tlp-presets/"* "/usr/local/share/power-manager/tlp-presets/"
-            success "TLP preset configurations installed"
-        fi
-        
-        # Install default optimized TLP configuration if none exists
-        if [ ! -f "/etc/tlp.conf" ] && [ -f "$SCRIPT_DIR/configs/tlp-presets/balanced.conf" ]; then
-            log "Installing default balanced TLP configuration..."
-            sudo cp "$SCRIPT_DIR/configs/tlp-presets/balanced.conf" "/etc/tlp.conf"
-            success "Default TLP configuration installed"
-        elif [ ! -f "/etc/tlp.conf.power-manager-backup" ] && [ -f "/etc/tlp.conf" ]; then
-            log "Creating backup of existing TLP configuration..."
-            sudo cp "/etc/tlp.conf" "/etc/tlp.conf.power-manager-backup"
-            success "TLP configuration backup created"
-        fi
-        
-        # Enable and start TLP
-        sudo systemctl enable tlp.service
-        sudo systemctl start tlp.service
-        
-        success "TLP configured and started"
+    if [ "$INSTALL_TLP" != "true" ]; then
+        info "Skipping TLP configuration"
+        return 0
     fi
+    
+    log "Configuring TLP..."
+    
+    # Enable TLP
+    sudo systemctl enable tlp
+    sudo systemctl start tlp
+    
+    # Mask power-profiles-daemon to prevent conflicts
+    sudo systemctl mask power-profiles-daemon 2>/dev/null || true
+    
+    success "TLP configured and enabled"
 }
 
-# Create bash aliases
+# Install aliases and shortcuts
 install_aliases() {
-    log "Installing bash aliases..."
-    
-    ALIAS_FILE="$HOME/.bash_aliases"
-    
-    # Create aliases file if it doesn't exist
-    if [ ! -f "$ALIAS_FILE" ]; then
-        touch "$ALIAS_FILE"
+    if [ "$INSTALL_ALIASES" != "true" ]; then
+        info "Skipping aliases installation"
+        return 0
     fi
     
-    # Check if our aliases already exist
-    if ! grep -q "# Linux Power Manager aliases" "$ALIAS_FILE"; then
-        cat >> "$ALIAS_FILE" << 'EOF'
+    log "Installing aliases and shortcuts..."
+    
+    # Create aliases file
+    cat > "$CONFIG_DIR/power-manager-aliases.sh" << 'EOF'
+# Power Manager Aliases - Modular System
+alias pc='power-control'
+alias pcm='power-control-modular'
+alias dm='disk-manager'
 
-# Linux Power Manager aliases
-alias power-status='power-status.sh status'
-alias power-presets='power-status.sh presets'
-alias power-select='power-status.sh select-preset'
-alias power-eco='power-control.sh ultra-eco'
-alias power-balanced='power-control.sh balanced'
-alias power-performance='power-control.sh performance-dgpu'
-alias power-gaming='power-control.sh gaming-max'
-alias gpu-status='power-control.sh gpu-status'
-alias gpu-integrated='power-control.sh gpu-integrated'
-alias gpu-hybrid='power-control.sh gpu-hybrid'
-alias gpu-nvidia='power-control.sh gpu-nvidia'
+# Power control shortcuts
+alias pc-status='power-control status'
+alias pc-list='power-control list-system-presets'
+alias pc-gpu='power-control list-gpu-presets'
+alias pc-composite='power-control list-composite-presets'
+alias pc-monitor='power-control monitor'
 
-# Disk Management aliases
-alias disk-status='disk-manager.sh status'
-alias disk-health='disk-manager.sh health'
-alias disk-temp='disk-manager.sh temp'
-alias disk-smart='disk-manager.sh smart'
-alias disk-scan='disk-manager.sh scan'
-alias disk-clean='disk-manager.sh clean'
+# Disk management shortcuts
+alias dm-status='disk-manager status'
+alias dm-monitor='disk-manager monitor'
+alias dm-suspend='disk-manager suspend'
+alias dm-wake='disk-manager wake'
 
-# WiFi Power Optimization aliases
-alias wifi-optimize='wifi-intel-optimizer.sh optimize'
-alias wifi-status='wifi-intel-optimizer.sh status'
-alias wifi-test='wifi-intel-optimizer.sh test'
+# WiFi optimization shortcuts (modular)
+alias wifi-opt='power-control wifi-optimize'
+alias wifi-status='power-control wifi-status'
+alias wifi-optimize='power-control wifi-optimize'
+alias wifi-test='power-control wifi-test'
+
+# Quick module disable/enable aliases
+alias wifi-off='power-control wifi-disable'
+alias wifi-on='power-control wifi-enable'
+alias disk-off='power-control disk-disable'
+alias disk-on='power-control disk-enable'
+
+# Preset shortcuts
+alias ultra-eco='power-control ultra-eco'
+alias balanced='power-control balanced'
+alias gaming-max='power-control gaming-max'
+alias performance='power-control performance'
 EOF
-        success "Bash aliases installed"
-        info "Run 'source ~/.bashrc' or restart your terminal to use aliases"
+    
+    # Add to bashrc if not already present
+    if ! grep -q "power-manager-aliases.sh" "$HOME/.bashrc"; then
+        echo "" >> "$HOME/.bashrc"
+        echo "# Power Manager Aliases" >> "$HOME/.bashrc"
+        echo "if [ -f ~/.config/power-manager-aliases.sh ]; then" >> "$HOME/.bashrc"
+        echo "    source ~/.config/power-manager-aliases.sh" >> "$HOME/.bashrc"
+        echo "fi" >> "$HOME/.bashrc"
+    fi
+    
+    success "Aliases installed"
+}
+
+# Install desktop shortcuts
+install_desktop_shortcuts() {
+    if [ "$INSTALL_DESKTOP_SHORTCUTS" != "true" ]; then
+        info "Skipping desktop shortcuts installation"
+        return 0
+    fi
+    
+    log "Installing desktop shortcuts..."
+    
+    # Create desktop directory
+    mkdir -p "$HOME/.local/share/applications"
+    
+    # Power Control shortcut
+    cat > "$HOME/.local/share/applications/power-control.desktop" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Power Control
+Comment=Linux Power Manager - Modular System
+Exec=gnome-terminal -- bash -c "power-control status; exec bash"
+Icon=preferences-system-power
+Terminal=false
+Categories=System;Settings;
+EOF
+    
+    # Disk Manager shortcut
+    cat > "$HOME/.local/share/applications/disk-manager.desktop" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Disk Manager
+Comment=Disk Power Management
+Exec=gnome-terminal -- bash -c "disk-manager status; exec bash"
+Icon=drive-harddisk
+Terminal=false
+Categories=System;Settings;
+EOF
+    
+    # WiFi Optimizer shortcut
+    cat > "$HOME/.local/share/applications/wifi-optimizer.desktop" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=WiFi Optimizer
+Comment=Intel WiFi Power Optimization
+Exec=gnome-terminal -- bash -c "wifi-intel-optimizer status; exec bash"
+Icon=network-wireless
+Terminal=false
+Categories=System;Settings;
+EOF
+    
+    # Update desktop database
+    update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    
+    success "Desktop shortcuts installed"
+}
+
+# Install man pages
+install_man_pages() {
+    if [ "$INSTALL_MAN_PAGES" != "true" ]; then
+        info "Skipping man pages installation"
+        return 0
+    fi
+    
+    log "Installing man pages..."
+    
+    # Create man directory
+    sudo mkdir -p "/usr/local/share/man/man1"
+    
+    # Power Control man page
+    sudo tee "/usr/local/share/man/man1/power-control.1" > /dev/null << 'EOF'
+.TH POWER-CONTROL 1 "2024-01-01" "Linux Power Manager" "User Commands"
+.SH NAME
+power-control \- Modular Linux Power Management System
+.SH SYNOPSIS
+.B power-control
+[\fIcommand\fR] [\fIoptions\fR]
+.SH DESCRIPTION
+Power Control is a comprehensive modular power management system for Linux.
+It provides system-wide power presets, GPU switching, disk management, and WiFi optimization.
+.SH COMMANDS
+.TP
+.B status
+Show current system status and power settings
+.TP
+.B list-system-presets
+List available system power presets
+.TP
+.B list-gpu-presets
+List available GPU switching presets
+.TP
+.B list-composite-presets
+List available composite presets
+.TP
+.B apply-system-preset <preset>
+Apply a system power preset
+.TP
+.B apply-gpu-preset <preset>
+Apply a GPU switching preset
+.TP
+.B apply-composite-preset <preset>
+Apply a composite preset
+.TP
+.B monitor
+Run comprehensive system monitoring
+.SH EXAMPLES
+.TP
+.B power-control status
+Show current system status
+.TP
+.B power-control apply-system-preset balanced
+Apply balanced power preset
+.TP
+.B power-control apply-gpu-preset hybrid
+Switch to hybrid GPU mode
+.SH FILES
+.TP
+.B ~/.config/modular-power.conf
+Modular power control configuration file
+.TP
+.B /usr/local/share/power-manager/presets/
+System preset files
+.SH SEE ALSO
+.BR disk-manager (1),
+.BR wifi-intel-optimizer (1)
+.SH AUTHOR
+Linux Power Manager Project
+EOF
+    
+    # Disk Manager man page
+    sudo tee "/usr/local/share/man/man1/disk-manager.1" > /dev/null << 'EOF'
+.TH DISK-MANAGER 1 "2024-01-01" "Linux Power Manager" "User Commands"
+.SH NAME
+disk-manager \- Disk Power Management System
+.SH SYNOPSIS
+.B disk-manager
+[\fIcommand\fR] [\fIdisk\fR]
+.SH DESCRIPTION
+Disk Manager provides automatic and manual disk suspension with comprehensive safety checks.
+It prevents data loss by checking for mounted filesystems, active processes, and LVM usage.
+.SH COMMANDS
+.TP
+.B status
+Show disk management status
+.TP
+.B monitor
+Suspend all safe disks
+.TP
+.B suspend <disk>
+Manually suspend a disk with safety checks
+.TP
+.B force-suspend <disk>
+Force suspend a disk (OVERRIDE SAFETY - RISKY)
+.TP
+.B auto-suspend <disk>
+Automatic suspend (NO OVERRIDE - SAFEST)
+.TP
+.B wake <disk>
+Wake up a suspended disk
+.TP
+.B optimize <disk>
+Apply Intel SSD optimizations
+.TP
+.B health <disk>
+Check disk health using SMART
+.SH SAFETY CHECKS
+Automatic suspension is blocked if ANY of these are true:
+.TP
+.B Disk is mounted or has mounted partitions
+.TP
+.B Disk has active processes
+.TP
+.B Disk is used by LVM
+.TP
+.B Disk is system disk (if EXCLUDE_SYSTEM_DISK=true)
+.TP
+.B Disk health issues (if SMART_MONITORING=true)
+.SH EXAMPLES
+.TP
+.B disk-manager status
+Show current disk status
+.TP
+.B disk-manager suspend nvme0n1
+Suspend secondary NVMe drive
+.TP
+.B disk-manager monitor
+Suspend all safe disks
+.SH FILES
+.TP
+.B ~/.config/disk-manager.conf
+Configuration file
+.SH SEE ALSO
+.BR power-control (1),
+.BR wifi-intel-optimizer (1)
+.SH AUTHOR
+Linux Power Manager Project
+EOF
+    
+    # Update man database
+    sudo mandb 2>/dev/null || true
+    
+    success "Man pages installed"
+}
+
+# Install shell completion
+install_shell_completion() {
+    if [ "$INSTALL_SHELL_COMPLETION" != "true" ]; then
+        info "Skipping shell completion installation"
+        return 0
+    fi
+    
+    log "Installing shell completion..."
+    
+    # Create completion directory
+    mkdir -p "$HOME/.local/share/bash-completion/completions"
+    
+    # Power Control completion
+    cat > "$HOME/.local/share/bash-completion/completions/power-control" << 'EOF'
+_power-control() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    
+    opts="status list-system-presets list-gpu-presets list-composite-presets apply-system-preset apply-gpu-preset apply-composite-preset monitor wifi-optimize wifi-status wifi-test disk-status disk-suspend disk-wake disk-monitor disk-config health-check metrics"
+    
+    case "${prev}" in
+        apply-system-preset)
+            local presets="balanced gaming-max ultra-eco intel-arc-optimized intel-hybrid-performance intel-arc-creative intel-eco"
+            COMPREPLY=( $(compgen -W "${presets}" -- ${cur}) )
+            return 0
+            ;;
+        apply-gpu-preset)
+            local presets="integrated hybrid nvidia"
+            COMPREPLY=( $(compgen -W "${presets}" -- ${cur}) )
+            return 0
+            ;;
+        apply-composite-preset)
+            local presets="balanced gaming eco work creative"
+            COMPREPLY=( $(compgen -W "${presets}" -- ${cur}) )
+            return 0
+            ;;
+    esac
+    
+    COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+    return 0
+}
+complete -F _power-control power-control
+complete -F _power-control power-control-modular
+complete -F _power-control pcm
+complete -F _power-control pc
+EOF
+    
+    # Disk Manager completion
+    cat > "$HOME/.local/share/bash-completion/completions/disk-manager" << 'EOF'
+_disk-manager() {
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    
+    opts="status monitor suspend force-suspend auto-suspend wake optimize health"
+    
+    case "${prev}" in
+        suspend|force-suspend|auto-suspend|wake|optimize|health)
+            local disks=$(lsblk -nd -o NAME,TYPE | awk '$2=="disk" {print $1}')
+            COMPREPLY=( $(compgen -W "${disks}" -- ${cur}) )
+            return 0
+            ;;
+    esac
+    
+    COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+    return 0
+}
+complete -F _disk-manager disk-manager
+complete -F _disk-manager dm
+EOF
+    
+    # Source completion in bashrc
+    if ! grep -q "bash-completion/completions" "$HOME/.bashrc"; then
+        echo "" >> "$HOME/.bashrc"
+        echo "# Bash completion" >> "$HOME/.bashrc"
+        echo "if [ -d ~/.local/share/bash-completion/completions ]; then" >> "$HOME/.bashrc"
+        echo "    for f in ~/.local/share/bash-completion/completions/*; do" >> "$HOME/.bashrc"
+        echo "        [ -f \"\$f\" ] && source \"\$f\"" >> "$HOME/.bashrc"
+        echo "    done" >> "$HOME/.bashrc"
+        echo "fi" >> "$HOME/.bashrc"
+    fi
+    
+    success "Shell completion installed"
+}
+
+# Fix script paths
+fix_script_paths() {
+    log "Fixing script paths..."
+    
+    # Fix power-control-modular.sh paths
+    sudo sed -i "s|LIB_DIR=\"\$SCRIPT_DIR/../lib\"|LIB_DIR=\"$LIB_PREFIX/lib\"|g" "$INSTALL_PREFIX/power-control-modular.sh"
+    sudo sed -i "s|PRESETS_DIR=\"\$SCRIPT_DIR/../presets\"|PRESETS_DIR=\"$LIB_PREFIX/presets\"|g" "$INSTALL_PREFIX/power-control-modular.sh"
+    
+    # Fix modular-power-system.sh paths
+    sudo sed -i "s|SYSTEM_PRESETS_DIR=\"\$SCRIPT_DIR/../presets/system-presets\"|SYSTEM_PRESETS_DIR=\"$LIB_PREFIX/presets/system-presets\"|g" "$LIB_PREFIX/lib/modular-power-system.sh"
+    sudo sed -i "s|GPU_PRESETS_DIR=\"\$SCRIPT_DIR/../presets/gpu-presets\"|GPU_PRESETS_DIR=\"$LIB_PREFIX/presets/gpu-presets\"|g" "$LIB_PREFIX/lib/modular-power-system.sh"
+    sudo sed -i "s|COMPOSITE_PRESETS_DIR=\"\$SCRIPT_DIR/../presets/composite-presets\"|COMPOSITE_PRESETS_DIR=\"$LIB_PREFIX/presets/composite-presets\"|g" "$LIB_PREFIX/lib/modular-power-system.sh"
+    
+    success "Script paths fixed"
+}
+
+# Create configuration files
+create_configurations() {
+    log "Creating configuration files..."
+    
+    # Note: power-control.conf is no longer used in modular system
+    # The modular system uses ~/.config/modular-power.conf instead
+    
+    # Create disk-manager.conf if it doesn't exist
+    if [ ! -f "$CONFIG_DIR/disk-manager.conf" ]; then
+        cat > "$CONFIG_DIR/disk-manager.conf" << 'EOF'
+# Disk Manager Configuration
+# Simple Disk Power Management
+
+# Core Settings
+DISK_MANAGEMENT_ENABLED=true
+AUTO_SUSPEND_ENABLED=true
+SUSPEND_ON_BATTERY_ONLY=false
+EXCLUDE_SYSTEM_DISK=true
+MONITORED_DISKS="auto"
+
+# Intel Optimizations
+INTEL_SSD_OPTIMIZATION=true
+SMART_MONITORING=true
+HEALTH_THRESHOLD=80
+
+# Power Management
+NVME_POWER_MANAGEMENT=true
+ENABLE_DEEP_SLEEP=false
+ADAPTIVE_TIMEOUT=true
+EOF
+    fi
+    
+    success "Configuration files created"
+}
+
+# Test installation
+test_installation() {
+    log "Testing installation..."
+    
+    # Test power-control
+    if "$INSTALL_PREFIX/power-control" status >/dev/null 2>&1; then
+        success "Power Control: OK"
     else
-        info "Aliases already installed"
+        error "Power Control: FAILED"
     fi
-}
-
-# Show usage instructions
-show_usage() {
-    echo -e "${CYAN}Linux Power Manager - Installation Complete!${NC}"
-    echo ""
-    echo -e "${YELLOW}Available Commands:${NC}"
-    echo "  power-control.sh status       - Show power status"
-    echo "  power-control.sh list-presets - List available presets"
-    echo "  power-control.sh ultra-eco    - Ultra power saving mode"
-    echo "  power-control.sh performance-dgpu - High performance mode"
-    echo "  power-status.sh select-preset - Interactive preset selection"
-    echo "  disk-manager.sh status        - Show disk status and health"
-    echo "  disk-manager.sh health        - Comprehensive disk health check"
-    echo "  disk-manager.sh temp          - Monitor disk temperatures"
-    echo "  wifi-intel-optimizer.sh optimize - Optimize Intel WiFi power settings"
-    echo "  wifi-intel-optimizer.sh status   - Show WiFi power status"
-    echo ""
-    echo -e "${YELLOW}Aliases (after restart/source):${NC}"
-    echo "  power-status      - Show power status"
-    echo "  power-presets     - List presets"
-    echo "  power-select      - Interactive preset menu"
-    echo "  power-eco         - Ultra eco mode"
-    echo "  power-performance - High performance mode"
-    echo "  gpu-status        - Show GPU status"
-    echo "  disk-status       - Show disk status"
-    echo "  disk-health       - Check disk health"
-    echo "  disk-temp         - Monitor disk temperatures"
-    echo "  wifi-optimize     - Optimize WiFi power settings"
-    echo "  wifi-status       - Show WiFi power status"
-    echo ""
-    echo -e "${YELLOW}Configuration:${NC}"
-    echo "  power-control.sh config - Configure settings"
-    echo "  Config files: ~/.config/power-*.conf"
-    echo ""
-    if [ "$INSTALL_TLP" = true ]; then
-        echo -e "${GREEN}TLP power management is enabled${NC}"
-    fi
-    if [ "$INSTALL_ENVYCONTROL" = true ]; then
-        echo -e "${GREEN}GPU switching with envycontrol is available${NC}"
-    fi
-    if [ "$INSTALL_SERVICES" = true ]; then
-        echo -e "${GREEN}Disk monitoring services are enabled${NC}"
-    fi
-}
-
-# Configure disk management settings
-configure_disk_management() {
-    echo -e "${CYAN}Configuring Disk Management Settings...${NC}"
-    echo ""
     
-    # Configure whitelist expiration
-    echo "When you manually wake up a disk, how long should it be protected from auto-suspension?"
-    echo "1) 30 minutes (1800 seconds)"
-    echo "2) 1 hour (3600 seconds) [DEFAULT]"
-    echo "3) 2 hours (7200 seconds)"
-    echo "4) 6 hours (21600 seconds)"
-    echo "5) 24 hours (86400 seconds)"
-    echo "6) Never expire (0 - manual removal only)"
-    echo ""
-    read -p "Choose whitelist expiration option (1-6, default=2): " whitelist_choice
-    
-    case "$whitelist_choice" in
-        1) WHITELIST_EXPIRY=1800 ;;
-        3) WHITELIST_EXPIRY=7200 ;;
-        4) WHITELIST_EXPIRY=21600 ;;
-        5) WHITELIST_EXPIRY=86400 ;;
-        6) WHITELIST_EXPIRY=0 ;;
-        *) WHITELIST_EXPIRY=3600 ;;  # Default 1 hour
-    esac
-    
-    echo ""
-    read -p "Enable disk monitoring on AC power as well? (y/N): " ac_monitoring
-    case "$ac_monitoring" in
-        [Yy]* ) SUSPEND_ON_BATTERY_ONLY=false ;;
-        * ) SUSPEND_ON_BATTERY_ONLY=true ;;
-    esac
-    
-    echo ""
-    read -p "Disk inactivity timeout in minutes before suspension (default=5): " timeout_choice
-    if [[ "$timeout_choice" =~ ^[0-9]+$ ]] && [ "$timeout_choice" -gt 0 ]; then
-        INACTIVITY_TIMEOUT=$((timeout_choice * 60))
+    # Test disk-manager
+    if "$INSTALL_PREFIX/disk-manager" status >/dev/null 2>&1; then
+        success "Disk Manager: OK"
     else
-        INACTIVITY_TIMEOUT=300  # Default 5 minutes
+        error "Disk Manager: FAILED"
     fi
     
-    echo ""
-    read -p "Timer monitoring interval in minutes (how often to check, default=5): " interval_choice
-    if [[ "$interval_choice" =~ ^[0-9]+$ ]] && [ "$interval_choice" -gt 0 ]; then
-        TIMER_INTERVAL="$interval_choice"
+    # Test wifi-optimizer
+    if "$INSTALL_PREFIX/wifi-intel-optimizer" status >/dev/null 2>&1; then
+        success "WiFi Optimizer: OK"
     else
-        TIMER_INTERVAL=5  # Default 5 minutes
-    fi
-}
-
-# Apply disk management configuration
-apply_disk_config() {
-    if [ -f "$CONFIG_DIR/disk-manager.conf" ]; then
-        log "Applying custom disk management settings..."
-        
-        # Update whitelist expiration
-        sed -i "s/^WHITELIST_DEFAULT_EXPIRY=.*/WHITELIST_DEFAULT_EXPIRY=$WHITELIST_EXPIRY/" "$CONFIG_DIR/disk-manager.conf"
-        
-        # Update battery-only setting
-        sed -i "s/^SUSPEND_ON_BATTERY_ONLY=.*/SUSPEND_ON_BATTERY_ONLY=$SUSPEND_ON_BATTERY_ONLY/" "$CONFIG_DIR/disk-manager.conf"
-        
-        # Update inactivity timeout
-        sed -i "s/^INACTIVITY_TIMEOUT=.*/INACTIVITY_TIMEOUT=$INACTIVITY_TIMEOUT/" "$CONFIG_DIR/disk-manager.conf"
-        
-        # Update timer interval
-        sed -i "s/^TIMER_INTERVAL=.*/TIMER_INTERVAL=$TIMER_INTERVAL/" "$CONFIG_DIR/disk-manager.conf"
-        
-        success "Disk management configuration applied"
-    fi
-}
-
-# Fix systemd service timeout
-fix_service_timeout() {
-    if [ "$INSTALL_SERVICES" = true ]; then
-        log "Optimizing systemd service configuration..."
-        
-        # Fix disk-monitor service timeout
-        if [ -f "$SERVICE_DIR/disk-monitor.service" ]; then
-            sudo sed -i 's/TimeoutStartSec=60/TimeoutStartSec=600/' "$SERVICE_DIR/disk-monitor.service"
-        fi
-        
-        # Update timer interval if configured
-        if [ -n "$TIMER_INTERVAL" ] && [ -f "$SERVICE_DIR/disk-monitor.timer" ]; then
-            sudo sed -i "s/OnUnitActiveSec=.*min/OnUnitActiveSec=${TIMER_INTERVAL}min/" "$SERVICE_DIR/disk-monitor.timer"
-        fi
-        
-        sudo systemctl daemon-reload
-        success "Service configuration optimized"
-    fi
-}
-
-# Interactive configuration
-interactive_config() {
-    echo -e "${CYAN}Linux Power Manager - Interactive Installation${NC}"
-    echo ""
-    
-    read -p "Install TLP for advanced power management? (Y/n): " tlp_choice
-    case "$tlp_choice" in
-        [Nn]* ) INSTALL_TLP=false ;;
-        * ) INSTALL_TLP=true ;;
-    esac
-    
-    read -p "Install envycontrol for GPU switching (NVIDIA laptops)? (y/N): " gpu_choice
-    case "$gpu_choice" in
-        [Yy]* ) INSTALL_ENVYCONTROL=true ;;
-        * ) INSTALL_ENVYCONTROL=false ;;
-    esac
-    
-    if [ "$INSTALL_ENVYCONTROL" = true ]; then
-        read -p "Enable GPU switching by default? (y/N): " gpu_enable
-        case "$gpu_enable" in
-            [Yy]* ) ENABLE_GPU_SWITCHING=true ;;
-            * ) ENABLE_GPU_SWITCHING=false ;;
-        esac
+        error "WiFi Optimizer: FAILED"
     fi
     
-    read -p "Install systemd services for auto-startup? (Y/n): " service_choice
-    case "$service_choice" in
-        [Nn]* ) INSTALL_SERVICES=false ;;
-        * ) INSTALL_SERVICES=true ;;
-    esac
+    # Test services
+    if systemctl is-active power-control-startup.service >/dev/null 2>&1; then
+        success "Power Control Services: OK"
+    else
+        warning "Power Control Services: Some services may not be running"
+    fi
     
-    echo ""
-    read -p "Configure disk management settings? (Y/n): " disk_config
-    case "$disk_config" in
-        [Nn]* ) ;; # Skip disk configuration
-        * ) configure_disk_management ;;
-    esac
+    success "Installation test completed"
 }
 
 # Main installation function
 main() {
-    echo -e "${PURPLE}╔═══════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║         Linux Power Manager Installer        ║${NC}"
-    echo -e "${PURPLE}║            Universal Installation             ║${NC}"
-    echo -e "${PURPLE}╚═══════════════════════════════════════════════╝${NC}"
+    echo -e "${PURPLE}╔═══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║                    🚀 LINUX POWER MANAGER v2.0.0                          ║${NC}"
+    echo -e "${PURPLE}║                    Comprehensive Modular Installer                        ║${NC}"
+    echo -e "${PURPLE}╚═══════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
     check_root
     detect_distro
-    get_package_manager
     
-    # Check for interactive mode
-    if [ "$1" = "--interactive" ] || [ "$1" = "-i" ]; then
-        interactive_config
-    fi
-    
-    echo ""
-    log "Starting installation..."
-    echo ""
+    log "Starting comprehensive installation..."
     
     install_dependencies
-    install_envycontrol
+    install_gpu_tools
+    create_directories
     install_scripts
-    install_configs
-    apply_disk_config
+    install_libraries
+    install_presets
     install_services
-    fix_service_timeout
     configure_tlp
     install_aliases
+    install_desktop_shortcuts
+    install_man_pages
+    install_shell_completion
+    fix_script_paths
+    create_configurations
+    test_installation
     
     echo ""
-    success "Installation completed successfully!"
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                        🎉 INSTALLATION COMPLETE!                        ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    show_usage
+    echo -e "${CYAN}Available commands:${NC}"
+    echo -e "  ${YELLOW}power-control${NC}     - Main power management system"
+    echo -e "  ${YELLOW}disk-manager${NC}       - Disk power management"
+    echo -e "  ${YELLOW}wifi-intel-optimizer${NC} - WiFi power optimization"
+    echo ""
+    echo -e "${CYAN}Quick start:${NC}"
+    echo -e "  ${YELLOW}power-control status${NC}     - Show system status"
+    echo -e "  ${YELLOW}power-control list-system-presets${NC} - List power presets"
+    echo -e "  ${YELLOW}disk-manager status${NC}      - Show disk status"
+        echo ""
+    echo -e "${CYAN}Configuration:${NC}"
+    echo -e "  ${YELLOW}~/.config/modular-power.conf${NC} - Modular power control settings"
+    echo -e "  ${YELLOW}~/.config/disk-manager.conf${NC}   - Disk management settings"
+        echo ""
+    echo -e "${CYAN}Services:${NC}"
+    echo -e "  ${YELLOW}systemctl status power-control-*${NC} - Check service status"
+        echo ""
+    echo -e "${GREEN}Installation completed successfully! 🚀${NC}"
 }
 
-# Handle command line arguments
-case "$1" in
-    "--help"|"-h")
-        echo "Linux Power Manager Installer"
-        echo ""
-        echo "Usage: $0 [options]"
-        echo ""
-        echo "Options:"
-        echo "  --interactive, -i    Interactive installation"
-        echo "  --help, -h          Show this help"
-        echo ""
-        echo "Environment variables:"
-        echo "  INSTALL_TLP=false   Skip TLP installation"
-        echo "  INSTALL_ENVYCONTROL=true   Install envycontrol"
-        echo "  ENABLE_GPU_SWITCHING=true   Enable GPU switching"
-        echo "  INSTALL_SERVICES=false   Skip systemd services"
-        exit 0
-        ;;
-    *)
+# Run main function
         main "$@"
-        ;;
-esac
+

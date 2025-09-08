@@ -5,7 +5,6 @@
 # Version: 2.0.0
 
 VERSION="2.0.0"
-CONFIG_FILE="$HOME/.config/power-control.conf"
 DISK_CONFIG_FILE="$HOME/.config/disk-manager.conf"
 
 # Load configuration
@@ -99,7 +98,6 @@ DISK_CONF_EOF
 
 # Source configurations
 init_disk_config
-source "$CONFIG_FILE" 2>/dev/null || true
 source "$DISK_CONFIG_FILE" 2>/dev/null || true
 
 # ============================================================================
