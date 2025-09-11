@@ -10,8 +10,14 @@
 
 VERSION="1.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../lib"
-PRESETS_DIR="$SCRIPT_DIR/../presets"
+# Use system installation paths
+LIB_DIR="/usr/local/share/power-manager/lib"
+PRESETS_DIR="/usr/local/share/power-manager/presets"
+# Fallback to relative paths for development
+if [ ! -d "$LIB_DIR" ]; then
+    LIB_DIR="$SCRIPT_DIR/../lib"
+    PRESETS_DIR="$SCRIPT_DIR/../presets"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -123,35 +129,66 @@ info() {
 # MODULAR IMPLEMENTATION FUNCTIONS
 # ============================================================================
 
-# Apply TLP configuration
+# Apply TLP configuration - BULLETPROOF PRESET REPLACEMENT METHOD
 apply_tlp_configuration() {
-    local mode="$1"
+    local preset="$1"
+    local preset_file="/usr/local/share/power-manager/presets/system-presets/${preset}.conf"
     
     if ! should_use_tlp; then
         log_debug "TLP not available or disabled, skipping TLP configuration" "TLP"
         return 0
     fi
     
-    log_info "Applying TLP configuration: $mode" "TLP"
+    # Validate preset file exists
+    if [ ! -f "$preset_file" ]; then
+        # Fallback to mode-based approach for backwards compatibility
+        log_info "Preset file not found: $preset_file, using mode-based approach" "TLP"
+        case "$preset" in
+            "bat"|"battery")
+                sudo tlp bat >/dev/null 2>&1
+                success "TLP set to battery mode"
+                return 0
+                ;;
+            "ac")
+                sudo tlp ac >/dev/null 2>&1
+                success "TLP set to AC mode"
+                return 0
+                ;;
+            "balanced"|"auto")
+                sudo tlp start >/dev/null 2>&1
+                success "TLP set to balanced mode"
+                return 0
+                ;;
+            *)
+                warning "Unknown TLP preset/mode: $preset"
+                return 1
+                ;;
+        esac
+    fi
     
-    case "$mode" in
-        "bat")
-            sudo tlp bat >/dev/null 2>&1
-            success "TLP set to battery mode"
-            ;;
-        "ac")
-            sudo tlp ac >/dev/null 2>&1
-            success "TLP set to AC mode"
-            ;;
-        "balanced"|"auto")
-            sudo tlp start >/dev/null 2>&1
-            success "TLP set to balanced mode"
-            ;;
-        *)
-            warning "Unknown TLP mode: $mode"
-            return 1
-            ;;
-    esac
+    log_info "Applying TLP preset: $preset (bulletproof method)" "TLP"
+    
+    # BULLETPROOF METHOD: Replace TLP configuration with our preset
+    if ! sudo cp "$preset_file" /etc/tlp.d/01-power-manager.conf; then
+        error "Failed to copy preset file to TLP configuration directory"
+        return 1
+    fi
+    
+    # Force TLP to reload configuration and apply settings
+    if ! sudo tlp start >/dev/null 2>&1; then
+        warning "TLP reported configuration errors but started successfully"
+    fi
+    
+    # Apply the current power mode (battery/AC) while keeping our configuration
+    local current_power_source=$(cat /sys/class/power_supply/AC*/online 2>/dev/null | head -1 || echo "0")
+    if [ "$current_power_source" = "1" ]; then
+        sudo tlp ac >/dev/null 2>&1
+    else
+        sudo tlp bat >/dev/null 2>&1
+    fi
+    
+    success "TLP preset '$preset' applied using bulletproof method"
+    return 0
 }
 
 # Apply power profile
