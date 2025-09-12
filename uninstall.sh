@@ -109,9 +109,6 @@ stop_services() {
     sudo systemctl stop power-control-monitor.timer 2>/dev/null || true
     sudo systemctl stop disk-monitor.service 2>/dev/null || true
     sudo systemctl stop disk-monitor.timer 2>/dev/null || true
-    sudo systemctl stop wifi-power-monitor.service 2>/dev/null || true
-    sudo systemctl stop wifi-power-monitor.timer 2>/dev/null || true
-    sudo systemctl stop wifi-power-optimizer.service 2>/dev/null || true
     
     # Disable services
     sudo systemctl disable power-control-startup.service 2>/dev/null || true
@@ -123,9 +120,6 @@ stop_services() {
     sudo systemctl disable wifi-power-monitor.service 2>/dev/null || true
     sudo systemctl disable wifi-power-monitor.timer 2>/dev/null || true
     sudo systemctl disable wifi-power-optimizer.service 2>/dev/null || true
-    
-    success "Services stopped and disabled"
-}
 
 # Remove systemd service files
 remove_services() {
@@ -144,9 +138,6 @@ remove_services() {
     
     # Reload systemd
     sudo systemctl daemon-reload
-    
-    success "Systemd service files removed"
-}
 
 # Remove main scripts
 remove_scripts() {
@@ -165,7 +156,6 @@ remove_scripts() {
 remove_libraries() {
     log "Removing libraries..."
     
-    # Remove library directory
     sudo rm -rf "$LIB_PREFIX"
     
     success "Libraries removed"

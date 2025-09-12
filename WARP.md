@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-Linux Power Manager is a comprehensive, cross-distribution power management system designed specifically for Linux laptops and desktops. It provides intelligent power presets, TLP integration, GPU switching, disk management, hibernation support, and WiFi optimization with special focus on Intel hardware.
+Linux Power Manager is a comprehensive, cross-distribution power management system designed specifically for Linux laptops and desktops. It provides intelligent power presets, TLP integration, GPU switching, disk management, and hibernation support with special focus on Intel hardware. WiFi power management is handled through TLP presets to avoid conflicts.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ The system follows a modular architecture with clear separation of concerns:
 
 #### 4. Specialized Tools
 - **Disk Manager**: `scripts/disk-manager.sh` - Advanced disk suspension management
-- **WiFi Optimizer**: `scripts/wifi-intel-optimizer.sh` - Intel WiFi power optimization
+- **WiFi Management**: Handled through TLP presets (no separate optimizer to avoid conflicts)
 
 ### Power Preset System
 
@@ -85,10 +85,8 @@ gdiscrete                   # Switch to discrete GPU
 
 ### Specialized Operations
 ```bash
-# WiFi power optimization
-pc wifi-status              # Check WiFi power status
-pc wifi-optimize            # Apply WiFi optimizations
-wifi-intel-optimizer.sh optimize  # Standalone WiFi optimization
+# WiFi status (read-only - managed by TLP)
+pc wifi-status              # Check basic WiFi status
 
 # Disk management
 pc disk-status              # Check disk management status
@@ -145,8 +143,7 @@ journalctl -u power-control-startup.service -n 50
 ```
 ├── scripts/                    # Main executable scripts
 │   ├── power-control-modular.sh    # Main unified interface
-│   ├── disk-manager.sh            # Disk management tool
-│   └── wifi-intel-optimizer.sh    # WiFi optimization tool
+│   └── disk-manager.sh            # Disk management tool
 ├── lib/                       # Enterprise libraries
 │   ├── modular-power-system.sh    # Core modular system
 │   ├── enterprise-logging.sh      # RFC 5424 logging
@@ -188,13 +185,13 @@ journalctl -u power-control-startup.service -n 50
 
 The project includes built-in validation systems:
 
-#### Testing WiFi Optimizations
+#### WiFi Power Management (via TLP)
 ```bash
-# Test WiFi power levels
-wifi-intel-optimizer.sh test
+# Check WiFi status (read-only)
+pc wifi-status
 
-# Check optimization status  
-wifi-intel-optimizer.sh status
+# WiFi power management is handled automatically by TLP presets
+# No manual WiFi optimization needed to avoid system conflicts
 ```
 
 #### Testing Power Presets
@@ -250,10 +247,10 @@ pc monitor
 The system includes specific optimizations for Intel hardware:
 
 #### Intel WiFi Adapters (AX200, AX210, AX1650, AX1690, etc.)
-- Power spike reduction through iwlwifi parameter tuning
-- U-APSD (Unscheduled Automatic Power Save Delivery) support
-- Scan optimization to reduce background activity
-- Expected savings: 1-5W reduction in WiFi power consumption
+- WiFi power management handled through TLP presets
+- Conservative settings to ensure stability and prevent disconnections
+- Optimized for reliability over maximum power savings
+- Avoids conflicts between multiple power management systems
 
 #### Intel Arc Graphics Support
 - Dedicated presets for Intel Arc Graphics (A350M, A370M, A730M, A770M)
@@ -340,6 +337,23 @@ Supports 15+ desktop environments including:
 - KDE Plasma (with PowerDevil integration)
 - XFCE, MATE, Cinnamon, LXQt, LXDE
 - i3, Sway, bspwm, and other window managers
+
+## Architecture Improvements (v2.0.1)
+
+### Stability Enhancements
+This version removes aggressive timer-based monitoring that could cause system instability:
+
+- **WiFi Optimization**: Removed standalone WiFi optimizer to prevent conflicts with TLP
+- **Disk Monitoring**: Removed aggressive disk-monitor.timer that could cause CPU throttling
+- **Unified Management**: All power management now handled through TLP presets for consistency
+- **Conservative Approach**: Prioritizes system stability over maximum power savings
+
+### Migration from Previous Versions
+If upgrading from earlier versions:
+1. Uninstall previous version completely
+2. Remove any residual WiFi optimization configs
+3. Reinstall with new architecture
+4. WiFi and disk power management now handled by TLP automatically
 
 ## Best Practices
 

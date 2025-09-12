@@ -751,21 +751,9 @@ process_modular_command() {
             fi
             ;;
         
-        # WiFi Optimization Commands
-        "wifi-optimize")
-            optimize_intel_wifi
-            ;;
+        # WiFi status (read-only - WiFi power management handled by TLP)
         "wifi-status")
-            show_wifi_status
-            ;;
-        "wifi-test")
-            test_wifi_power
-            ;;
-        "wifi-disable")
-            disable_wifi_optimization
-            ;;
-        "wifi-enable")
-            enable_wifi_optimization
+            show_basic_wifi_status
             ;;
         
         # Disk Management Commands
@@ -845,12 +833,8 @@ show_modular_help() {
     echo "  work-mode              Apply work mode composite preset"
     echo "  developer-mode         Apply developer mode composite preset"
     echo ""
-    echo "WiFi Optimization Commands:"
-    echo "  wifi-optimize           Optimize Intel WiFi power settings"
-    echo "  wifi-status             Show WiFi power status"
-    echo "  wifi-test               Test WiFi power levels"
-    echo "  wifi-disable            Disable WiFi optimization module"
-    echo "  wifi-enable             Enable WiFi optimization module"
+    echo "WiFi Status Commands:"
+    echo "  wifi-status             Show basic WiFi status (power managed by TLP)"
     echo ""
     echo "Disk Management Commands:"
     echo "  disk-status             Show disk management status"
@@ -896,113 +880,41 @@ export -f list_gpu_presets
 export -f list_composite_presets
 export -f modular_status_report
 # ============================================================================
-# WIFI OPTIMIZATION FUNCTIONS
+# BASIC WIFI STATUS FUNCTIONS
 # ============================================================================
 
-# Optimize Intel WiFi power settings
-optimize_intel_wifi() {
-    if command -v log_info >/dev/null 2>&1; then
-        log_info "Optimizing Intel WiFi power settings..." "WIFI"
-    else
-        echo "Optimizing Intel WiFi power settings..."
-    fi
+# Show basic WiFi status (WiFi power management handled by TLP)
+show_basic_wifi_status() {
+    echo "Basic WiFi Status (Power Management via TLP):"
+    echo "============================================="
     
-    # Check if Intel WiFi is present
-    if ! lspci | grep -i "intel" | grep -i "network" >/dev/null; then
-        if command -v error >/dev/null 2>&1; then
-            error "No Intel WiFi adapter detected"
-        else
-            echo "ERROR: No Intel WiFi adapter detected"
-        fi
-        return 1
-    fi
-    
-    # Get WiFi interface
-    local interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
-    if [ -z "$interface" ]; then
-        if command -v error >/dev/null 2>&1; then
-            error "No WiFi interface found"
-        else
-            echo "ERROR: No WiFi interface found"
-        fi
-        return 1
-    fi
-    
-    # Apply Intel WiFi optimizations
-    if command -v iw >/dev/null 2>&1; then
-        # Set power save mode
-        sudo iw dev "$interface" set power_save on 2>/dev/null || true
-        
-        # Set U-APSD (if supported)
-        sudo iw dev "$interface" set uapsd on 2>/dev/null || true
-        
-        if command -v success >/dev/null 2>&1; then
-            success "Intel WiFi power optimizations applied" "WIFI"
-        else
-            echo "SUCCESS: Intel WiFi power optimizations applied"
-        fi
-    else
-        if command -v warning >/dev/null 2>&1; then
-            warning "iw command not available, skipping runtime optimizations" "WIFI"
-        else
-            echo "WARNING: iw command not available, skipping runtime optimizations"
-        fi
-    fi
-}
-
-# Show WiFi power status
-show_wifi_status() {
-    echo "WiFi Power Status:"
-    echo "=================="
-    
-    # Check Intel WiFi
-    if lspci | grep -i "intel" | grep -i "network" >/dev/null; then
-        echo "✅ Intel WiFi adapter detected"
+    # Check for WiFi adapter
+    local wifi_info=$(lspci | grep -i "network\|wifi\|wireless" | head -1)
+    if [ -n "$wifi_info" ]; then
+        echo "📶 WiFi Adapter: $wifi_info"
         
         # Get WiFi interface
         local interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
         if [ -n "$interface" ]; then
-            echo "📶 WiFi Interface: $interface"
+            echo "🔌 Interface: $interface"
             
-            # Check power save status
+            # Check connection status
+            local connection_status=$(nmcli -t -f DEVICE,STATE dev | grep "$interface" | cut -d: -f2)
+            echo "🔗 Status: ${connection_status:-unknown}"
+            
+            # Check current power save status (read-only)
             if command -v iw >/dev/null 2>&1; then
                 local power_save=$(iw dev "$interface" get power_save 2>/dev/null || echo "unknown")
-                echo "🔋 Power Save: $power_save"
-                
-                local uapsd=$(iw dev "$interface" get uapsd 2>/dev/null || echo "unknown")
-                echo "⚡ U-APSD: $uapsd"
+                echo "⚡ Current Power Save: $power_save"
             fi
         fi
     else
-        echo "❌ No Intel WiFi adapter detected"
-    fi
-}
-
-# Test WiFi power levels
-test_wifi_power() {
-    echo "WiFi Power Test:"
-    echo "================"
-    
-    local interface=$(ip link show | grep -E "wl|wlan" | cut -d: -f2 | tr -d ' ' | head -1)
-    if [ -z "$interface" ]; then
-        echo "ERROR: No WiFi interface found"
-        return 1
+        echo "❌ No WiFi adapter detected"
     fi
     
-    echo "Testing WiFi interface: $interface"
-    
-    # Test different power levels
-    for level in on off; do
-        echo "Testing power save: $level"
-        sudo iw dev "$interface" set power_save "$level" 2>/dev/null || echo "Failed to set power_save $level"
-        sleep 2
-        
-        local current=$(iw dev "$interface" get power_save 2>/dev/null || echo "unknown")
-        echo "Current power save: $current"
-        echo ""
-    done
-    
-    echo "WiFi power test completed"
+    echo ""
+    echo "ℹ️  Note: WiFi power management is handled by TLP presets."
+    echo "   Check TLP configuration files for WiFi power settings."
 }
 
 # ============================================================================
@@ -1163,7 +1075,7 @@ general_monitoring() {
     
     # WiFi status
     echo "📶 WiFi Status:"
-    show_wifi_status
+    show_basic_wifi_status
     echo ""
     
     # Disk status
@@ -1196,59 +1108,6 @@ general_monitoring() {
 # MODULE DISABLE/ENABLE FUNCTIONS
 # ============================================================================
 
-# Disable WiFi optimization module
-disable_wifi_optimization() {
-    if command -v log_info >/dev/null 2>&1; then
-        log_info "Disabling WiFi optimization module..." "WIFI"
-    else
-        echo "Disabling WiFi optimization module..."
-    fi
-    
-    # Stop and disable WiFi services
-    sudo systemctl stop wifi-power-monitor.service 2>/dev/null || true
-    sudo systemctl stop wifi-power-monitor.timer 2>/dev/null || true
-    sudo systemctl stop wifi-power-optimizer.service 2>/dev/null || true
-    sudo systemctl disable wifi-power-monitor.timer 2>/dev/null || true
-    sudo systemctl disable wifi-power-optimizer.service 2>/dev/null || true
-    
-    # Create disable flag
-    mkdir -p "$HOME/.config"
-    touch "$HOME/.config/wifi-optimization-disabled"
-    
-    if command -v success >/dev/null 2>&1; then
-        success "WiFi optimization module disabled" "WIFI"
-    else
-        echo "✅ WiFi optimization module disabled"
-    fi
-    echo "   Services stopped and disabled"
-    echo "   To re-enable: power-control wifi-enable"
-}
-
-# Enable WiFi optimization module
-enable_wifi_optimization() {
-    if command -v log_info >/dev/null 2>&1; then
-        log_info "Enabling WiFi optimization module..." "WIFI"
-    else
-        echo "Enabling WiFi optimization module..."
-    fi
-    
-    # Remove disable flag
-    rm -f "$HOME/.config/wifi-optimization-disabled"
-    
-    # Enable and start WiFi services
-    sudo systemctl enable wifi-power-monitor.timer 2>/dev/null || true
-    sudo systemctl enable wifi-power-optimizer.service 2>/dev/null || true
-    sudo systemctl start wifi-power-optimizer.service 2>/dev/null || true
-    sudo systemctl start wifi-power-monitor.timer 2>/dev/null || true
-    
-    if command -v success >/dev/null 2>&1; then
-        success "WiFi optimization module enabled" "WIFI"
-    else
-        echo "✅ WiFi optimization module enabled"
-    fi
-    echo "   Services enabled and started"
-    echo "   WiFi optimization will run automatically"
-}
 
 # Disable disk management module
 disable_disk_management() {
@@ -1303,16 +1162,12 @@ enable_disk_management() {
 
 export -f process_modular_command
 export -f show_modular_help
-export -f optimize_intel_wifi
-export -f show_wifi_status
-export -f test_wifi_power
+export -f show_basic_wifi_status
 export -f show_disk_status
 export -f suspend_disk
 export -f wake_disk
 export -f monitor_disks
 export -f configure_disk_management
 export -f general_monitoring
-export -f disable_wifi_optimization
-export -f enable_wifi_optimization
 export -f disable_disk_management
 export -f enable_disk_management

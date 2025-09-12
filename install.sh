@@ -241,13 +241,8 @@ install_scripts() {
     sudo cp "$SCRIPT_DIR/scripts/disk-manager.sh" "$INSTALL_PREFIX/"
     sudo chmod +x "$INSTALL_PREFIX/disk-manager.sh"
     
-    # Install wifi-intel-optimizer.sh
-    sudo cp "$SCRIPT_DIR/scripts/wifi-intel-optimizer.sh" "$INSTALL_PREFIX/"
-    sudo chmod +x "$INSTALL_PREFIX/wifi-intel-optimizer.sh"
-    
     # Create command symlinks
     sudo ln -sf "$INSTALL_PREFIX/disk-manager.sh" "$INSTALL_PREFIX/disk-manager"
-    sudo ln -sf "$INSTALL_PREFIX/wifi-intel-optimizer.sh" "$INSTALL_PREFIX/wifi-intel-optimizer"
     
     success "Main scripts installed"
 }
@@ -306,18 +301,10 @@ install_services() {
         sudo systemctl enable power-control-wake.service
     sudo systemctl enable power-control-monitor.service
         sudo systemctl enable power-control-monitor.timer
-        sudo systemctl enable disk-monitor.service
-        sudo systemctl enable disk-monitor.timer
-    sudo systemctl enable wifi-power-monitor.service
-    sudo systemctl enable wifi-power-monitor.timer
-    sudo systemctl enable wifi-power-optimizer.service
     
     # Start services
     sudo systemctl start power-control-startup.service
     sudo systemctl start power-control-monitor.timer
-    sudo systemctl start disk-monitor.timer
-    sudo systemctl start wifi-power-monitor.timer
-    sudo systemctl start wifi-power-optimizer.service
         
         success "Systemd services installed and enabled"
 }
@@ -370,15 +357,10 @@ alias dm-monitor='disk-manager monitor'
 alias dm-suspend='disk-manager suspend'
 alias dm-wake='disk-manager wake'
 
-# WiFi optimization shortcuts (modular)
-alias wifi-opt='power-control wifi-optimize'
+# WiFi status shortcuts (read-only - managed by TLP)
 alias wifi-status='power-control wifi-status'
-alias wifi-optimize='power-control wifi-optimize'
-alias wifi-test='power-control wifi-test'
 
 # Quick module disable/enable aliases
-alias wifi-off='power-control wifi-disable'
-alias wifi-on='power-control wifi-enable'
 alias disk-off='power-control disk-disable'
 alias disk-on='power-control disk-enable'
 
@@ -439,18 +421,6 @@ Terminal=false
 Categories=System;Settings;
 EOF
     
-    # WiFi Optimizer shortcut
-    cat > "$HOME/.local/share/applications/wifi-optimizer.desktop" << EOF
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=WiFi Optimizer
-Comment=Intel WiFi Power Optimization
-Exec=gnome-terminal -- bash -c "wifi-intel-optimizer status; exec bash"
-Icon=network-wireless
-Terminal=false
-Categories=System;Settings;
-EOF
     
     # Update desktop database
     update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
@@ -480,7 +450,7 @@ power-control \- Modular Linux Power Management System
 [\fIcommand\fR] [\fIoptions\fR]
 .SH DESCRIPTION
 Power Control is a comprehensive modular power management system for Linux.
-It provides system-wide power presets, GPU switching, disk management, and WiFi optimization.
+It provides system-wide power presets, GPU switching, and disk management.
 .SH COMMANDS
 .TP
 .B status
@@ -525,7 +495,6 @@ Modular power control configuration file
 System preset files
 .SH SEE ALSO
 .BR disk-manager (1),
-.BR wifi-intel-optimizer (1)
 .SH AUTHOR
 Linux Power Manager Project
 EOF
@@ -594,7 +563,6 @@ Suspend all safe disks
 Configuration file
 .SH SEE ALSO
 .BR power-control (1),
-.BR wifi-intel-optimizer (1)
 .SH AUTHOR
 Linux Power Manager Project
 EOF
@@ -625,7 +593,7 @@ _power-control() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     
-    opts="status list-system-presets list-gpu-presets list-composite-presets apply-system-preset apply-gpu-preset apply-composite-preset monitor wifi-optimize wifi-status wifi-test disk-status disk-suspend disk-wake disk-monitor disk-config health-check metrics"
+    opts="status list-system-presets list-gpu-presets list-composite-presets apply-system-preset apply-gpu-preset apply-composite-preset monitor wifi-status disk-status disk-suspend disk-wake disk-monitor disk-config health-check metrics"
     
     case "${prev}" in
         apply-system-preset)
@@ -762,12 +730,7 @@ test_installation() {
         error "Disk Manager: FAILED"
     fi
     
-    # Test wifi-optimizer
-    if "$INSTALL_PREFIX/wifi-intel-optimizer" status >/dev/null 2>&1; then
-        success "WiFi Optimizer: OK"
-    else
-        error "WiFi Optimizer: FAILED"
-    fi
+    # WiFi management is now handled by TLP
     
     # Test services
     if systemctl is-active power-control-startup.service >/dev/null 2>&1; then
@@ -816,7 +779,7 @@ main() {
     echo -e "${CYAN}Available commands:${NC}"
     echo -e "  ${YELLOW}power-control${NC}     - Main power management system"
     echo -e "  ${YELLOW}disk-manager${NC}       - Disk power management"
-    echo -e "  ${YELLOW}wifi-intel-optimizer${NC} - WiFi power optimization"
+    # WiFi optimizer removed; WiFi is managed by TLP
     echo ""
     echo -e "${CYAN}Quick start:${NC}"
     echo -e "  ${YELLOW}power-control status${NC}     - Show system status"
