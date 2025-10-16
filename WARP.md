@@ -233,9 +233,8 @@ pc monitor
 ### GPU Switching Support
 
 #### Supported GPU Switching Tools
-- **envycontrol**: Primary tool for NVIDIA Optimus laptops
-- **supergfxctl**: ASUS ROG laptops with supergfxd
-- **Manual switching**: Direct GPU control via kernel parameters
+- **envycontrol**: Primary tool for NVIDIA Optimus laptops (only supported tool)
+- **Manual switching**: Direct GPU control via kernel parameters (fallback)
 
 #### GPU Modes
 - **Integrated**: Intel iGPU only (maximum battery life)
@@ -307,8 +306,7 @@ disk-manager.sh activity <disk>        # Check disk activity
 
 ### Optional Dependencies
 - `tlp` + `tlp-rdw` - Advanced power management (recommended)
-- `envycontrol` - GPU switching for NVIDIA laptops
-- `supergfxctl` - GPU switching for ASUS ROG laptops
+- `envycontrol` - GPU switching for NVIDIA laptops (required for GPU switching)
 - `curl`/`wget` - For updates and downloads
 
 ## Enterprise Features

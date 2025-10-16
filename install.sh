@@ -33,6 +33,7 @@ INSTALL_MAN_PAGES=true
 INSTALL_SHELL_COMPLETION=true
 ENABLE_GPU_SWITCHING=true
 ENABLE_INTEL_OPTIMIZATIONS=true
+ENABLE_FREEZE_SESSION_MANAGER=true
 
 # Logging functions
 log() {
@@ -187,24 +188,7 @@ install_gpu_tools() {
         esac
     fi
     
-    # Install supergfxctl
-    if ! command -v supergfxctl >/dev/null 2>&1; then
-        log "Installing supergfxctl..."
-        case $DISTRO in
-            ubuntu|debian|pop|elementary)
-                sudo apt install -y supergfxctl
-                ;;
-            fedora|rhel|centos|rocky|alma)
-                sudo dnf install -y supergfxctl
-                ;;
-            arch|manjaro)
-                sudo pacman -S --noconfirm supergfxctl
-                ;;
-            *)
-                warning "Please install supergfxctl manually"
-            ;;
-    esac
-    fi
+    # Note: supergfxctl removed - only using envycontrol for GPU switching
     
     success "GPU switching tools installed successfully"
 }
@@ -216,7 +200,6 @@ create_directories() {
     sudo mkdir -p "$LIB_PREFIX/lib"
     sudo mkdir -p "$LIB_PREFIX/presets/system-presets"
     sudo mkdir -p "$LIB_PREFIX/presets/gpu-presets"
-    sudo mkdir -p "$LIB_PREFIX/presets/composite-presets"
     sudo mkdir -p "$CONFIG_DIR"
     
     # Create user directories
@@ -243,6 +226,9 @@ install_scripts() {
     
     # Create command symlinks
     sudo ln -sf "$INSTALL_PREFIX/disk-manager.sh" "$INSTALL_PREFIX/disk-manager"
+    
+    # Create nvidia-freeze-manager symlink
+    sudo ln -sf "$LIB_PREFIX/lib/nvidia-freeze-manager.sh" "$INSTALL_PREFIX/nvidia-freeze-manager"
     
     success "Main scripts installed"
 }
@@ -272,10 +258,6 @@ install_presets() {
         sudo find "$SCRIPT_DIR/presets/gpu-presets" -name "*.conf" -not -path "*/backup*" -exec cp {} "$LIB_PREFIX/presets/gpu-presets/" \;
     fi
     
-    # Install composite presets
-    if [ -d "$SCRIPT_DIR/presets/composite-presets" ]; then
-        sudo find "$SCRIPT_DIR/presets/composite-presets" -name "*.conf" -not -path "*/backup*" -exec cp {} "$LIB_PREFIX/presets/composite-presets/" \;
-    fi
     
     success "Presets installed"
 }
@@ -348,7 +330,6 @@ alias dm='disk-manager'
 alias pc-status='power-control status'
 alias pc-list='power-control list-system-presets'
 alias pc-gpu='power-control list-gpu-presets'
-alias pc-composite='power-control list-composite-presets'
 alias pc-monitor='power-control monitor'
 
 # Disk management shortcuts
@@ -364,11 +345,16 @@ alias wifi-status='power-control wifi-status'
 alias disk-off='power-control disk-disable'
 alias disk-on='power-control disk-enable'
 
-# Preset shortcuts
-alias ultra-eco='power-control ultra-eco'
-alias balanced='power-control balanced'
-alias gaming-max='power-control gaming-max'
-alias performance='power-control performance'
+# System preset shortcuts
+alias ultra-eco='power-control system-preset ultra-eco'
+alias balanced='power-control system-preset balanced'
+alias gaming='power-control system-preset gaming'
+alias performance='power-control system-preset performance'
+
+# GPU preset shortcuts
+alias gpu-integrated='power-control gpu-preset integrated'
+alias gpu-hybrid='power-control gpu-preset hybrid'
+alias gpu-nvidia='power-control gpu-preset discrete'
 EOF
     
     # Add to bashrc if not already present
@@ -462,17 +448,11 @@ List available system power presets
 .B list-gpu-presets
 List available GPU switching presets
 .TP
-.B list-composite-presets
-List available composite presets
-.TP
 .B apply-system-preset <preset>
 Apply a system power preset
 .TP
 .B apply-gpu-preset <preset>
 Apply a GPU switching preset
-.TP
-.B apply-composite-preset <preset>
-Apply a composite preset
 .TP
 .B monitor
 Run comprehensive system monitoring
@@ -742,6 +722,46 @@ test_installation() {
     success "Installation test completed"
 }
 
+# Setup NVIDIA Freeze Session Manager
+setup_freeze_session_manager() {
+    if [ "$ENABLE_FREEZE_SESSION_MANAGER" != "true" ]; then
+        info "Skipping NVIDIA Freeze Session Manager setup"
+        return 0
+    fi
+    
+    log "Setting up NVIDIA Freeze Session Manager..."
+    
+    # Create systemd override directories
+    sudo mkdir -p "/etc/systemd/system/systemd-suspend.service.d"
+    sudo mkdir -p "/etc/systemd/system/systemd-hibernate.service.d"
+    
+    # Create override files (disabled by default, will be enabled based on GPU mode)
+    sudo tee "/etc/systemd/system/systemd-suspend.service.d/20-restore-freeze-sessions.conf.disabled" > /dev/null << 'EOF'
+[Service]
+# Override NVIDIA's SYSTEMD_SLEEP_FREEZE_USER_SESSIONS=false setting
+# This restores normal suspend behavior when using integrated graphics
+Environment=
+EOF
+    
+    sudo tee "/etc/systemd/system/systemd-hibernate.service.d/20-restore-freeze-sessions.conf.disabled" > /dev/null << 'EOF'
+[Service]
+# Override NVIDIA's SYSTEMD_SLEEP_FREEZE_USER_SESSIONS=false setting
+# This restores normal suspend behavior when using integrated graphics
+Environment=
+EOF
+    
+    # Reload systemd
+    sudo systemctl daemon-reload
+    
+    # Run auto-configuration to set up based on current GPU mode
+    if [ -f "$LIB_PREFIX/lib/nvidia-freeze-manager.sh" ]; then
+        source "$LIB_PREFIX/lib/nvidia-freeze-manager.sh"
+        auto_configure_freeze_session
+    fi
+    
+    success "NVIDIA Freeze Session Manager configured"
+}
+
 # Main installation function
 main() {
     echo -e "${PURPLE}╔═══════════════════════════════════════════════════════════════════════════╗${NC}"
@@ -763,6 +783,7 @@ main() {
     install_presets
     install_services
     configure_tlp
+    setup_freeze_session_manager
     install_aliases
     install_desktop_shortcuts
     install_man_pages
@@ -777,14 +798,17 @@ main() {
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${CYAN}Available commands:${NC}"
-    echo -e "  ${YELLOW}power-control${NC}     - Main power management system"
-    echo -e "  ${YELLOW}disk-manager${NC}       - Disk power management"
+    echo -e "  ${YELLOW}power-control${NC}         - Main power management system"
+    echo -e "  ${YELLOW}disk-manager${NC}           - Disk power management"
+    echo -e "  ${YELLOW}nvidia-freeze-manager${NC} - NVIDIA suspend/freeze session manager"
     # WiFi optimizer removed; WiFi is managed by TLP
     echo ""
     echo -e "${CYAN}Quick start:${NC}"
-    echo -e "  ${YELLOW}power-control status${NC}     - Show system status"
-    echo -e "  ${YELLOW}power-control list-system-presets${NC} - List power presets"
-    echo -e "  ${YELLOW}disk-manager status${NC}      - Show disk status"
+    echo -e "  ${YELLOW}power-control status${NC}             - Show system status"
+    echo -e "  ${YELLOW}power-control list-system-presets${NC}   - List power presets"
+    echo -e "  ${YELLOW}power-control gpu-preset integrated${NC} - Switch to Intel GPU"
+    echo -e "  ${YELLOW}nvidia-freeze-manager status${NC}     - Show freeze session status"
+    echo -e "  ${YELLOW}disk-manager status${NC}              - Show disk status"
         echo ""
     echo -e "${CYAN}Configuration:${NC}"
     echo -e "  ${YELLOW}~/.config/modular-power.conf${NC} - Modular power control settings"

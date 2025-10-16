@@ -322,26 +322,20 @@ apply_disk_optimizations() {
 apply_gpu_mode() {
     local mode="$1"
     local reboot_required=false
+    local old_mode=$(get_gpu_mode)
     
     echo "Applying GPU mode: $mode"
     
-    # Handle different GPU switching methods
-    if has_supergfxctl; then
-        case "$mode" in
-            "integrated")
-                sudo supergfxctl -m integrated 2>/dev/null
-                success "Switched to integrated GPU mode"
-                ;;
-            "hybrid")
-                sudo supergfxctl -m hybrid 2>/dev/null
-                success "Switched to hybrid GPU mode"
-                ;;
-            "nvidia"|"discrete")
-                sudo supergfxctl -m dedicated 2>/dev/null
-                success "Switched to discrete GPU mode"
-                ;;
-        esac
-    elif has_envycontrol; then
+    # Source NVIDIA freeze manager if available
+    if [ -f "$LIB_DIR/nvidia-freeze-manager.sh" ]; then
+        source "$LIB_DIR/nvidia-freeze-manager.sh"
+        
+        # Pre-configure freeze session for target GPU mode
+        on_apply_gpu_preset "gpu-$mode" "$mode"
+    fi
+    
+    # Handle GPU switching with envycontrol
+    if has_envycontrol; then
         case "$mode" in
             "integrated")
                 sudo envycontrol -s integrated 2>/dev/null
@@ -366,6 +360,12 @@ apply_gpu_mode() {
     if [ "$new_mode" != "$mode" ]; then
         reboot_required=true
         warning "GPU mode change requires reboot to take effect"
+    fi
+    
+    # Post-switch freeze session configuration
+    if [ -f "$LIB_DIR/nvidia-freeze-manager.sh" ] && [ "$reboot_required" = "false" ]; then
+        # Only update if no reboot required (immediate switch)
+        on_gpu_mode_changed "$new_mode" "$old_mode"
     fi
     
     if [ "$reboot_required" = "true" ]; then
@@ -398,9 +398,7 @@ should_use_tlp() {
 
 # Get GPU mode
 get_gpu_mode() {
-    if has_supergfxctl; then
-        supergfxctl -g 2>/dev/null || echo "unknown"
-    elif has_envycontrol; then
+    if has_envycontrol; then
         envycontrol --query 2>/dev/null || echo "unknown"
     else
         echo "unknown"
@@ -458,7 +456,6 @@ has_gsettings() { command -v gsettings > /dev/null 2>&1; }
 has_sensors() { command -v sensors > /dev/null 2>&1; }
 has_tlp() { command -v tlp > /dev/null 2>&1; }
 has_envycontrol() { command -v envycontrol > /dev/null 2>&1; }
-has_supergfxctl() { command -v supergfxctl > /dev/null 2>&1; }
 has_disk_manager() { [ -x "$(dirname "$0")/disk-manager.sh" ] || [ -x "/usr/local/bin/disk-manager.sh" ]; }
 
 # ============================================================================

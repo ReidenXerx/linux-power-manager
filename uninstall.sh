@@ -139,6 +139,26 @@ remove_services() {
     # Reload systemd
     sudo systemctl daemon-reload
 
+# Remove NVIDIA Freeze Session Manager configurations
+remove_freeze_session_configs() {
+    log "Removing NVIDIA Freeze Session Manager configurations..."
+    
+    # Remove freeze session override files (both enabled and disabled)
+    sudo rm -f "/etc/systemd/system/systemd-suspend.service.d/20-restore-freeze-sessions.conf"
+    sudo rm -f "/etc/systemd/system/systemd-suspend.service.d/20-restore-freeze-sessions.conf.disabled"
+    sudo rm -f "/etc/systemd/system/systemd-hibernate.service.d/20-restore-freeze-sessions.conf"
+    sudo rm -f "/etc/systemd/system/systemd-hibernate.service.d/20-restore-freeze-sessions.conf.disabled"
+    
+    # Remove directories if empty
+    sudo rmdir "/etc/systemd/system/systemd-suspend.service.d" 2>/dev/null || true
+    sudo rmdir "/etc/systemd/system/systemd-hibernate.service.d" 2>/dev/null || true
+    
+    # Reload systemd
+    sudo systemctl daemon-reload
+    
+    success "NVIDIA Freeze Session Manager configurations removed"
+}
+
 # Remove main scripts
 remove_scripts() {
     log "Removing main scripts..."
@@ -147,6 +167,7 @@ remove_scripts() {
     sudo rm -f "$INSTALL_PREFIX/power-control-modular.sh"
     sudo rm -f "$INSTALL_PREFIX/power-control"
     sudo rm -f "$INSTALL_PREFIX/disk-manager.sh"
+    sudo rm -f "$INSTALL_PREFIX/nvidia-freeze-manager"
     sudo rm -f "$INSTALL_PREFIX/wifi-intel-optimizer.sh"
     
     success "Main scripts removed"
@@ -440,6 +461,7 @@ main() {
     
     stop_services
     remove_services
+    remove_freeze_session_configs
     remove_scripts
     remove_libraries
     remove_presets
